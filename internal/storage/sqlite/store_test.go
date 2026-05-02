@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -12,17 +12,7 @@ func TestStoreCreateGetUpdateDelete(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	store, err := OpenAndMigrate(ctx, Config{
-		Path: filepath.Join(t.TempDir(), "rein.db"),
-	})
-	if err != nil {
-		t.Fatalf("OpenAndMigrate() error = %v", err)
-	}
-	defer func() {
-		if closeErr := store.Close(); closeErr != nil {
-			t.Fatalf("Close() error = %v", closeErr)
-		}
-	}()
+	store := openTestStore(t, ctx)
 
 	created, err := store.Create(ctx, ProjectKind, "project-1", json.RawMessage(`{"name":"rein"}`))
 	if err != nil {
@@ -78,11 +68,19 @@ func TestStoreRejectsInvalidPayload(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	store, err := OpenAndMigrate(ctx, Config{
-		Path: filepath.Join(t.TempDir(), "rein.db"),
-	})
+	store := openTestStore(t, ctx)
+
+	if _, err := store.Create(ctx, WorkflowKind, "workflow-1", json.RawMessage(`{`)); !errors.Is(err, ErrInvalidPayload) {
+		t.Fatalf("Create() invalid payload error = %v, want %v", err, ErrInvalidPayload)
+	}
+}
+
+func TestOpenInMemoryAndMigrate(t *testing.T) {
+	t.Parallel()
+
+	store, err := OpenInMemoryAndMigrate(context.Background(), t.Name())
 	if err != nil {
-		t.Fatalf("OpenAndMigrate() error = %v", err)
+		t.Fatalf("OpenInMemoryAndMigrate() error = %v", err)
 	}
 	defer func() {
 		if closeErr := store.Close(); closeErr != nil {
@@ -90,8 +88,43 @@ func TestStoreRejectsInvalidPayload(t *testing.T) {
 		}
 	}()
 
-	if _, err := store.Create(ctx, WorkflowKind, "workflow-1", json.RawMessage(`{`)); !errors.Is(err, ErrInvalidPayload) {
-		t.Fatalf("Create() invalid payload error = %v, want %v", err, ErrInvalidPayload)
+	assertTableExists(t, store.DB(), "projects", true)
+}
+
+func TestInMemoryConfigUsesSharedCacheURI(t *testing.T) {
+	t.Parallel()
+
+	cfg := InMemoryConfig("rein test")
+	if !strings.Contains(cfg.Path, "mode=memory") || !strings.Contains(cfg.Path, "cache=shared") {
+		t.Fatalf("InMemoryConfig() path = %q", cfg.Path)
+	}
+	if !isInMemoryPath(cfg.Path) {
+		t.Fatalf("isInMemoryPath(%q) = false, want true", cfg.Path)
+	}
+}
+
+func TestOpenRejectsMissingPath(t *testing.T) {
+	t.Parallel()
+
+	if _, err := Open(context.Background(), Config{}); !errors.Is(err, ErrMissingPath) {
+		t.Fatalf("Open() error = %v, want %v", err, ErrMissingPath)
+	}
+}
+
+func TestTableForUnknownKind(t *testing.T) {
+	t.Parallel()
+
+	if _, err := tableFor(EntityKind("nope")); !errors.Is(err, ErrUnknownKind) {
+		t.Fatalf("tableFor() error = %v, want %v", err, ErrUnknownKind)
+	}
+}
+
+func TestStoreGetRejectsEmptyID(t *testing.T) {
+	t.Parallel()
+
+	_, err := openTestStore(t, context.Background()).Get(context.Background(), ProjectKind, "")
+	if !errors.Is(err, ErrEmptyID) {
+		t.Fatalf("Get() error = %v, want %v", err, ErrEmptyID)
 	}
 }
 
