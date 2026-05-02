@@ -1,0 +1,9 @@
+DROP TABLE IF EXISTS featureflags;
+DROP TABLE IF EXISTS settings;
+DROP TABLE IF EXISTS costevents;
+DROP TABLE IF EXISTS sideeffects;
+DROP TABLE IF EXISTS tasksteps;
+DROP TABLE IF EXISTS executions;
+DROP TABLE IF EXISTS issues;
+DROP TABLE IF EXISTS workflows;
+DROP TABLE IF EXISTS projects;
