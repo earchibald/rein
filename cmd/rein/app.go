@@ -149,7 +149,7 @@ func (a *app) serveDaemon(config daemonServeConfig) error {
 	}
 	defer store.Close()
 
-	catalog, err := service.NewManagedCatalogFromRoot(".", adapter.DiscoveryOptions{})
+	catalog, err := service.NewManagedCatalogFromRoot(".", adapter.LocalDiscoveryOptions())
 	if err != nil {
 		return fmt.Errorf("load adapter registry: %w", err)
 	}

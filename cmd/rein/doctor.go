@@ -276,7 +276,7 @@ func diagnoseSocket(path string) doctorSocketDiagnostic {
 }
 
 func diagnosePlugins(root string) doctorPluginDiagnostic {
-	diagnostic := adapter.Diagnose(root, adapter.DiscoveryOptions{})
+	diagnostic := adapter.Diagnose(root, adapter.LocalDiscoveryOptions())
 
 	adapters := make([]doctorAdapterDiagnostic, 0, len(diagnostic.Adapters))
 	availableCount := 0

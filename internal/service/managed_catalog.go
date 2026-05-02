@@ -44,7 +44,23 @@ func (c *registryManagedCatalog) Lookup(id string) (ManagedAdapter, bool) {
 	if !ok {
 		return nil, false
 	}
+	if adapter, ok := builtinManagedAdapter(entry.Descriptor); ok {
+		return adapter, true
+	}
 	return &registryManagedAdapter{descriptor: entry.Descriptor, source: entry.Source}, true
+}
+
+func builtinManagedAdapter(descriptor *reinv1.Adapter) (ManagedAdapter, bool) {
+	if descriptor == nil {
+		return nil, false
+	}
+
+	switch descriptor.GetId() {
+	case messagingNullAdapterID:
+		return newManagedMessagingAdapter(descriptor, nil), true
+	default:
+		return nil, false
+	}
 }
 
 type registryManagedAdapter struct {

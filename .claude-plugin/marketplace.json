@@ -17,11 +17,19 @@
         "source": "github"
       },
       "version": "0.1.0"
+    },
+    {
+      "category": "messaging",
+      "daemonApiVersion": "rein.v1",
+      "description": "No-op managed messaging adapter stub.",
+      "name": "messaging-null",
+      "source": "./plugins/messaging-null",
+      "version": "0.1.0"
     }
   ],
   "signature": {
     "algorithm": "ed25519",
-    "keyId": "rn23-marketplace-bootstrap",
-    "value": "FV/LN1bWx05WT6etZTMsJvhy1Esdgki9tHhXqwTXn5e95VcQzLKfRolxrqYTfdO9bdjlXxI0RRlGkoWbMu4EDQ=="
+    "keyId": "rein-marketplace-phase4",
+    "value": "IniJumkkqBHuZ+e+R4FGpF2aG2a0HlGPOWMp+1TyQdGFWbn0AOR0OYoX2FixmOQeUM6yGVsO6timE7ckklmOBw=="
   }
 }
