@@ -1,0 +1,182 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - '[0-9][0-9][0-9][0-9].[0-9][0-9].*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Preflight
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+
+    steps:
+      - name: Validate CalVer tag
+        id: tag
+        run: |
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]+$ ]]; then
+            echo "release tags must match YYYY.MM.PATCH, got ${GITHUB_REF_NAME}" >&2
+            exit 1
+          fi
+          echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install just
+        uses: taiki-e/install-action@just
+
+      - name: Install mdBook
+        uses: taiki-e/install-action@mdbook
+
+      - name: Run CI-equivalent checks
+        run: just ci
+
+  macos-smoke:
+    name: macOS smoke
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install just
+        uses: taiki-e/install-action@just
+
+      - name: Run macOS-targeted checks
+        run: just ci-macos
+
+  build:
+    name: Build ${{ matrix.goos }}-${{ matrix.goarch }}
+    needs:
+      - preflight
+      - macos-smoke
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      attestations: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            archive_ext: tar.gz
+          - goos: linux
+            goarch: arm64
+            archive_ext: tar.gz
+          - goos: darwin
+            goarch: amd64
+            archive_ext: tar.gz
+          - goos: darwin
+            goarch: arm64
+            archive_ext: tar.gz
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build release archive
+        id: package
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+
+          archive_base="rein_${VERSION}_${GOOS}_${GOARCH}"
+          dist_dir="dist/${archive_base}"
+          mkdir -p "${dist_dir}"
+
+          build_time="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          ldflags="-s -w \
+            -X github.com/earchibald/rein/internal/buildinfo.Version=${VERSION} \
+            -X github.com/earchibald/rein/internal/buildinfo.Commit=${GITHUB_SHA} \
+            -X github.com/earchibald/rein/internal/buildinfo.BuildTime=${build_time} \
+            -X github.com/earchibald/rein/internal/buildinfo.BuiltBy=github-actions"
+
+          CGO_ENABLED=0 GOOS="${GOOS}" GOARCH="${GOARCH}" \
+            go build -trimpath -ldflags "${ldflags}" -o "${dist_dir}/rein" ./cmd/rein
+
+          archive_path="dist/${archive_base}.${{ matrix.archive_ext }}"
+          tar -C dist -czf "${archive_path}" "${archive_base}"
+
+          echo "archive=${archive_path}" >> "$GITHUB_OUTPUT"
+          echo "archive_name=$(basename "${archive_path}")" >> "$GITHUB_OUTPUT"
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: ${{ steps.package.outputs.archive }}
+
+      - name: Upload release archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.archive_name }}
+          path: ${{ steps.package.outputs.archive }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs:
+      - preflight
+      - build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release archives
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Normalize downloaded artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          find dist -type f -mindepth 2 -maxdepth 2 -exec mv {} release/ \;
+
+      - name: Generate checksums
+        working-directory: release
+        run: shasum -a 256 * > checksums.txt
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            release/*
