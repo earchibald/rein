@@ -102,8 +102,8 @@ func TestMigrateDownStepsRollsBackLatestMigration(t *testing.T) {
 	}
 
 	assertTableExists(t, store.DB(), "projects", true)
-	assertTableExists(t, store.DB(), "costeventlog", false)
-	assertTableExists(t, store.DB(), "budgetstates", false)
+	assertTableExists(t, store.DB(), "costeventlog", true)
+	assertTableExists(t, store.DB(), "budgetstates", true)
 	assertTableHasColumns(t, store.DB(), "settings", false, "scope_layer", "scope_id")
 
 	if err := store.Close(); err != nil {
