@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/earchibald/rein/internal/adapter"
 	"github.com/earchibald/rein/internal/server"
 	"github.com/earchibald/rein/internal/service"
 )
@@ -43,9 +44,13 @@ func run() int {
 		}
 	}()
 
-	runtime := server.New(server.Options{
-		Services: service.NewSet(),
-	})
+	services, err := service.NewSetFromRoot(".", adapter.DiscoveryOptions{})
+	if err != nil {
+		logger.Error("failed to load adapter registry", "error", err)
+		return 1
+	}
+
+	runtime := server.New(server.Options{Services: services})
 
 	logger.Info("rein gRPC server starting", "network", *network, "address", listener.Addr().String())
 	logger.Info(
