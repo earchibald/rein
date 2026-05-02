@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/earchibald/rein/internal/reporoot"
 )
 
 const (
@@ -93,19 +95,7 @@ func Load(root string) (*Registry, error) {
 }
 
 func FindRoot(start string) (string, error) {
-	current := filepath.Clean(start)
-	for {
-		marketplacePath := filepath.Join(current, defaultMarketplacePath)
-		if _, err := os.Stat(marketplacePath); err == nil {
-			return current, nil
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			break
-		}
-		current = parent
-	}
-	return "", fmt.Errorf("dashboards marketplace %q was not found from %q", defaultMarketplacePath, start)
+	return reporoot.Find(start, defaultMarketplacePath, "dashboards marketplace")
 }
 
 func (r *Registry) Entry(name string) (Entry, bool) {

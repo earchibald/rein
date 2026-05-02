@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -26,6 +27,7 @@ import (
 	"github.com/earchibald/rein/internal/adapter"
 	"github.com/earchibald/rein/internal/dashboards"
 	"github.com/earchibald/rein/internal/instance"
+	"github.com/earchibald/rein/internal/reporoot"
 	"github.com/earchibald/rein/internal/server"
 	"github.com/earchibald/rein/internal/service"
 	"github.com/earchibald/rein/internal/storage/sqlite"
@@ -180,9 +182,9 @@ func (a *app) serveDaemon(config daemonServeConfig) error {
 	}
 	defer store.Close()
 
-	catalog, err := service.NewManagedCatalogFromRoot(".", adapter.LocalDiscoveryOptions())
+	catalog, err := a.loadManagedCatalog()
 	if err != nil {
-		return fmt.Errorf("load adapter registry: %w", err)
+		return err
 	}
 
 	listenerConfig := config.listener
@@ -217,6 +219,21 @@ func (a *app) serveDaemon(config daemonServeConfig) error {
 	defer stop()
 
 	return runtime.Serve(ctx, listener)
+}
+
+func (a *app) loadManagedCatalog() (service.ManagedCatalog, error) {
+	catalog, err := service.NewManagedCatalogFromRoot(".", adapter.LocalDiscoveryOptions())
+	if err == nil {
+		return catalog, nil
+	}
+
+	var notFound *reporoot.NotFoundError
+	if errors.As(err, &notFound) {
+		_, _ = fmt.Fprintf(a.stderr, "rein: warning: %v; continuing with built-in adapters only\n", err)
+		return service.NewManagedCatalog(nil), nil
+	}
+
+	return nil, fmt.Errorf("load adapter registry: %w", err)
 }
 
 type dashboardsApplyConfig struct {

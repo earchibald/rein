@@ -14,7 +14,7 @@ All examples below use `./bin/rein`, but the same commands work if you place the
 
 ## 2. Start the daemon
 
-By default, rein talks to the `live` instance over that instance's unix socket:
+By default, rein talks to the `live` instance over that instance's unix socket. When you run from a rein checkout, the daemon also walks upward to the repo root so bundled adapters stay visible from child directories:
 
 ```bash
 ./bin/rein daemon serve
@@ -34,7 +34,7 @@ For example, to run a second instance explicitly:
 
 ## 3. Confirm local health
 
-`rein doctor` is the fastest way to confirm the selected instance is wired correctly:
+`rein doctor` is the fastest way to confirm the selected instance is wired correctly. It also reports whether repo-local adapter marketplace discovery succeeded for the current working directory:
 
 ```bash
 ./bin/rein doctor

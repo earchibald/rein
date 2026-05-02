@@ -189,6 +189,31 @@ func TestLoadRepositoryMarketplaceMuxitermEntry(t *testing.T) {
 	}
 }
 
+func TestLoadRepositoryMarketplaceFromSubdirectory(t *testing.T) {
+	t.Parallel()
+
+	root := repoRoot(t)
+	registry, err := Load(filepath.Join(root, "plugins", "tracker-github"), DiscoveryOptions{})
+	if err != nil {
+		t.Fatalf("Load(subdirectory) error = %v", err)
+	}
+
+	if _, ok := registry.Entry("muxiterm"); !ok {
+		t.Fatal(`Entry("muxiterm") = !ok`)
+	}
+}
+
+func TestLoadMissingMarketplaceFailsClearly(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	_, err := Load(root, DiscoveryOptions{AllowUnsignedIndex: true})
+	want := `adapter marketplace ".claude-plugin/marketplace.json" was not found from "` + root + `"`
+	if err == nil || err.Error() != want {
+		t.Fatalf("Load() error = %v, want %q", err, want)
+	}
+}
+
 func adapterIDs(adapters []*reinv1.Adapter) []string {
 	ids := make([]string, 0, len(adapters))
 	for _, adapter := range adapters {

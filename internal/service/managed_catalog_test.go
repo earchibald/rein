@@ -200,6 +200,54 @@ func TestManagedCatalogWrapsBuiltInGitHubTracker(t *testing.T) {
 	}
 }
 
+func TestNewManagedCatalogFromRootDiscoversRepositoryRootFromSubdirectory(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeManagedCatalogMarketplace(t, root, map[string]any{
+		"name": "rein-fixture",
+		"plugins": []any{
+			map[string]any{
+				"name":             githubTrackerAdapterID,
+				"source":           "./plugins/" + githubTrackerAdapterID,
+				"version":          "0.1.0",
+				"description":      "Fixture GitHub tracker adapter",
+				"category":         "tracker",
+				"daemonApiVersion": adapter.CurrentDaemonAPIVersion,
+			},
+		},
+	})
+	writeManagedCatalogManifest(t, root, githubTrackerAdapterID, map[string]any{
+		"name":             githubTrackerAdapterID,
+		"version":          "0.1.0",
+		"description":      "Fixture GitHub tracker adapter",
+		"category":         "tracker",
+		"daemonApiVersion": adapter.CurrentDaemonAPIVersion,
+	})
+
+	start := filepath.Join(root, "nested", "deeper")
+	if err := os.MkdirAll(start, 0o755); err != nil {
+		t.Fatalf("MkdirAll(start) error = %v", err)
+	}
+
+	catalog, err := NewManagedCatalogFromRoot(start, adapter.DiscoveryOptions{AllowUnsignedIndex: true})
+	if err != nil {
+		t.Fatalf("NewManagedCatalogFromRoot(subdirectory) error = %v", err)
+	}
+
+	managed, ok := catalog.Lookup(githubTrackerAdapterID)
+	if !ok {
+		t.Fatalf("Lookup(%q) = !ok", githubTrackerAdapterID)
+	}
+	tracker, ok := managed.(*githubTrackerAdapter)
+	if !ok {
+		t.Fatalf("Lookup(%q) type = %T, want *githubTrackerAdapter", githubTrackerAdapterID, managed)
+	}
+	if tracker.root != root {
+		t.Fatalf("githubTrackerAdapter.root = %q, want %q", tracker.root, root)
+	}
+}
+
 func managedCatalogIDs(adapters []*reinv1.Adapter) []string {
 	ids := make([]string, 0, len(adapters))
 	for _, descriptor := range adapters {

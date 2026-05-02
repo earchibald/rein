@@ -1,6 +1,9 @@
 package adapter
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 func TestDiagnoseReportsPluginCompatibilityFailures(t *testing.T) {
 	t.Parallel()
@@ -30,5 +33,23 @@ func TestDiagnoseReportsPluginCompatibilityFailures(t *testing.T) {
 	}
 	if mismatch.Error == "" {
 		t.Fatalf("Error = empty, want mismatch diagnostic: %+v", *mismatch)
+	}
+}
+
+func TestDiagnoseFromWorkingDirReportsMissingMarketplace(t *testing.T) {
+	t.Parallel()
+
+	start := filepath.Join(t.TempDir(), "nested", "deeper")
+	diagnostic := DiagnoseFromWorkingDir(start, DiscoveryOptions{AllowUnsignedIndex: true})
+
+	if diagnostic.RootFound {
+		t.Fatalf("RootFound = true, want false: %+v", diagnostic)
+	}
+	if diagnostic.RegistryReady {
+		t.Fatalf("RegistryReady = true, want false: %+v", diagnostic)
+	}
+	want := `adapter marketplace ".claude-plugin/marketplace.json" was not found from "` + start + `"`
+	if diagnostic.Error != want {
+		t.Fatalf("Error = %q, want %q", diagnostic.Error, want)
 	}
 }

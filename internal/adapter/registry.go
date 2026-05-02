@@ -131,19 +131,19 @@ type pluginRecord struct {
 }
 
 func Load(root string, options DiscoveryOptions) (*Registry, error) {
-	var err error
-	options, err = options.withRootDefaults(root)
+	resolvedRoot, err := FindRoot(root)
+	if err != nil {
+		return nil, err
+	}
+
+	options, err = options.withRootDefaults(resolvedRoot)
 	if err != nil {
 		return nil, fmt.Errorf("load trusted keys: %w", err)
 	}
 
-	marketplacePath := filepath.Join(root, ".claude-plugin", "marketplace.json")
-	raw, err := os.ReadFile(marketplacePath)
+	raw, _, err := readMarketplaceIndex(resolvedRoot)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return &Registry{entries: map[string]Entry{}}, nil
-		}
-		return nil, fmt.Errorf("read marketplace index: %w", err)
+		return nil, err
 	}
 
 	if err := verifyIndexSignature(raw, options); err != nil {
@@ -161,7 +161,7 @@ func Load(root string, options DiscoveryOptions) (*Registry, error) {
 	}
 
 	for _, plugin := range document.Plugins {
-		entry, err := loadPlugin(root, plugin, options)
+		entry, err := loadPlugin(resolvedRoot, plugin, options)
 		if err != nil {
 			return nil, fmt.Errorf("load plugin %q: %w", plugin.Name, err)
 		}
@@ -172,6 +172,18 @@ func Load(root string, options DiscoveryOptions) (*Registry, error) {
 	}
 
 	return registry, nil
+}
+
+func readMarketplaceIndex(root string) (raw []byte, marketplacePath string, err error) {
+	marketplacePath = filepath.Join(root, MarketplaceIndexPath)
+	raw, err = os.ReadFile(marketplacePath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, marketplacePath, fmt.Errorf("read marketplace index: %q was not found", marketplacePath)
+		}
+		return nil, marketplacePath, fmt.Errorf("read marketplace index: %w", err)
+	}
+	return raw, marketplacePath, nil
 }
 
 func NormalizeCategory(value string) (Taxonomy, error) {
