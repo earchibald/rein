@@ -39,6 +39,7 @@ type app struct {
 	stderr      io.Writer
 	lookupEnv   func(string) (string, bool)
 	userHomeDir func() (string, error)
+	getwd       func() (string, error)
 }
 
 type rpcCommand struct {
@@ -57,12 +58,16 @@ type fieldBinding struct {
 	set   bool
 }
 
-func newApp(stdout, stderr io.Writer, lookupEnv func(string) (string, bool), userHomeDir func() (string, error)) *app {
+func newApp(stdout, stderr io.Writer, lookupEnv func(string) (string, bool), userHomeDir, getwd func() (string, error)) *app {
+	if getwd == nil {
+		getwd = os.Getwd
+	}
 	return &app{
 		stdout:      stdout,
 		stderr:      stderr,
 		lookupEnv:   lookupEnv,
 		userHomeDir: userHomeDir,
+		getwd:       getwd,
 	}
 }
 
@@ -84,6 +89,8 @@ func (a *app) run(args []string) error {
 	switch remaining[0] {
 	case "daemon":
 		return a.runDaemon(root, remaining[1:])
+	case "doctor":
+		return a.runDoctor(root, remaining[1:])
 	default:
 		return a.runRPC(root, remaining)
 	}
@@ -407,6 +414,7 @@ func (a *app) printRootHelp() {
 	fmt.Fprintln(a.stderr, "Usage:")
 	fmt.Fprintln(a.stderr, "  rein [global flags] <service> <verb> [flags]")
 	fmt.Fprintln(a.stderr, "  rein [global flags] daemon serve [flags]")
+	fmt.Fprintln(a.stderr, "  rein [global flags] doctor")
 	fmt.Fprintln(a.stderr)
 	fmt.Fprintln(a.stderr, "Global flags:")
 	fmt.Fprintf(a.stderr, "  --instance string\n    Select the daemon instance (default %q or %s)\n", instance.DefaultName, instance.EnvVar)
@@ -436,6 +444,7 @@ func (a *app) printRootHelp() {
 	}
 	fmt.Fprintln(a.stderr)
 	fmt.Fprintln(a.stderr, "  daemon serve\tStart the daemon and expose the canonical gRPC surface.")
+	fmt.Fprintln(a.stderr, "  doctor\tEmit JSON diagnostics for daemon health and local instance readiness.")
 }
 
 func (a *app) printDaemonHelp() {
@@ -447,6 +456,15 @@ func (a *app) printDaemonHelp() {
 	fmt.Fprintln(a.stderr, "  --grpc-address string")
 	fmt.Fprintln(a.stderr, "    Listener address or unix socket path.")
 	fmt.Fprintf(a.stderr, "  --grpc-require-peer-credentials bool\n    Require SO_PEERCRED same-UID authentication for unix sockets (default %t)\n", server.DefaultListenerConfig().RequirePeerCredentials)
+}
+
+func (a *app) printDoctorHelp() {
+	fmt.Fprintln(a.stderr, "Usage:")
+	fmt.Fprintln(a.stderr, "  rein [global flags] doctor")
+	fmt.Fprintln(a.stderr)
+	fmt.Fprintln(a.stderr, "Emit machine-parseable JSON diagnostics covering daemon reachability,")
+	fmt.Fprintln(a.stderr, "instance layout, adapter registry compatibility, credential readiness,")
+	fmt.Fprintln(a.stderr, "and SQLite migration state for the selected instance.")
 }
 
 func (a *app) printCommandHelp(command rpcCommand) {

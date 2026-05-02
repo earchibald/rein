@@ -13,7 +13,7 @@ func main() {
 }
 
 func run() int {
-	app := newApp(os.Stdout, os.Stderr, os.LookupEnv, os.UserHomeDir)
+	app := newApp(os.Stdout, os.Stderr, os.LookupEnv, os.UserHomeDir, os.Getwd)
 	if err := app.run(os.Args[1:]); err != nil {
 		return parseErrorExitCode(err, os.Stderr)
 	}
