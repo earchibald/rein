@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -68,6 +69,11 @@ type Record struct {
 	Payload     json.RawMessage
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+}
+
+type ListOptions struct {
+	JSONEquals map[string]string
+	Limit      int
 }
 
 type Store struct {
@@ -279,6 +285,69 @@ func (s *Store) Update(ctx context.Context, kind EntityKind, id string, expected
 	}
 
 	return record, nil
+}
+
+func (s *Store) List(ctx context.Context, kind EntityKind, options ListOptions) ([]Record, error) {
+	table, err := tableFor(kind)
+	if err != nil {
+		return nil, err
+	}
+
+	// #nosec G201 -- table is selected from the fixed entity kind map via tableFor.
+	query := fmt.Sprintf(`SELECT id, lock_version, payload, created_at, updated_at FROM %s`, table)
+	args := make([]any, 0, len(options.JSONEquals)*2+1)
+	if len(options.JSONEquals) > 0 {
+		keys := make([]string, 0, len(options.JSONEquals))
+		for key := range options.JSONEquals {
+			keys = append(keys, key)
+		}
+		slices.Sort(keys)
+
+		clauses := make([]string, 0, len(keys))
+		for _, key := range keys {
+			clauses = append(clauses, `json_extract(payload, ?) = ?`)
+			args = append(args, "$."+key, options.JSONEquals[key])
+		}
+		query += " WHERE " + strings.Join(clauses, " AND ")
+	}
+	query += " ORDER BY created_at ASC"
+	if options.Limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, options.Limit)
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: list %s: %w", kind, err)
+	}
+	defer rows.Close()
+
+	var records []Record
+	for rows.Next() {
+		var (
+			record       Record
+			createdAtRaw string
+			updatedAtRaw string
+		)
+		if err := rows.Scan(&record.ID, &record.LockVersion, &record.Payload, &createdAtRaw, &updatedAtRaw); err != nil {
+			return nil, fmt.Errorf("sqlite: scan %s row: %w", kind, err)
+		}
+		record.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAtRaw)
+		if err != nil {
+			return nil, fmt.Errorf("sqlite: parse created_at for %s %q: %w", kind, record.ID, err)
+		}
+		record.UpdatedAt, err = time.Parse(time.RFC3339Nano, updatedAtRaw)
+		if err != nil {
+			return nil, fmt.Errorf("sqlite: parse updated_at for %s %q: %w", kind, record.ID, err)
+		}
+		record.Payload = clonePayload(record.Payload)
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("sqlite: iterate %s rows: %w", kind, err)
+	}
+
+	return records, nil
 }
 
 func (s *Store) Delete(ctx context.Context, kind EntityKind, id string, expectedLockVersion int64) error {

@@ -75,6 +75,49 @@ func TestStoreRejectsInvalidPayload(t *testing.T) {
 	}
 }
 
+func TestStoreListByJSONField(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := openTestStore(t, ctx)
+
+	records := map[string]json.RawMessage{
+		"sideeffect-1": json.RawMessage(`{"execution_id":"exec-1","status":"pending"}`),
+		"sideeffect-2": json.RawMessage(`{"execution_id":"exec-1","status":"applied"}`),
+		"sideeffect-3": json.RawMessage(`{"execution_id":"exec-2","status":"pending"}`),
+	}
+	for id, payload := range records {
+		if _, err := store.Create(ctx, SideEffectKind, id, payload); err != nil {
+			t.Fatalf("Create(%q) error = %v", id, err)
+		}
+	}
+
+	got, err := store.List(ctx, SideEffectKind, ListOptions{
+		JSONEquals: map[string]string{
+			"execution_id": "exec-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("List() len = %d, want 2", len(got))
+	}
+
+	limited, err := store.List(ctx, SideEffectKind, ListOptions{
+		JSONEquals: map[string]string{
+			"status": "pending",
+		},
+		Limit: 1,
+	})
+	if err != nil {
+		t.Fatalf("List() with limit error = %v", err)
+	}
+	if len(limited) != 1 {
+		t.Fatalf("List() with limit len = %d, want 1", len(limited))
+	}
+}
+
 func TestOpenInMemoryAndMigrate(t *testing.T) {
 	t.Parallel()
 
