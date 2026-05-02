@@ -838,11 +838,12 @@ func newManagedFlowAdapterCatalog(tb testing.TB) *managedFlowAdapterCatalog {
 			Version:     "0.1.0",
 			Enabled:     true,
 			Capabilities: map[string]string{
-				"issue.sync":      "true",
-				"branch.prepare":  "true",
-				"worktree.create": "true",
-				"pull_request":    "true",
-				"merge":           "true",
+				"issue.sync":               "true",
+				"branch.prepare":           "true",
+				"worktree.create":          "true",
+				"pull_request":             "true",
+				"pull_request_review.poll": "true",
+				"merge":                    "true",
 			},
 		},
 	}
@@ -850,7 +851,7 @@ func newManagedFlowAdapterCatalog(tb testing.TB) *managedFlowAdapterCatalog {
 		Descriptor:           tracker.Descriptor(),
 		Implementation:       tracker,
 		Contract:             (*managedFlowTrackerContract)(nil),
-		RequiredCapabilities: []string{"issue.sync", "branch.prepare", "worktree.create", "pull_request", "merge"},
+		RequiredCapabilities: []string{"issue.sync", "branch.prepare", "worktree.create", "pull_request", "pull_request_review.poll", "merge"},
 	})
 
 	coding := &managedFlowCodingAdapter{

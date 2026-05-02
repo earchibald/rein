@@ -19,11 +19,16 @@ func NewManagedCatalogFromRoot(root string, options adapter.DiscoveryOptions) (M
 	if err != nil {
 		return nil, err
 	}
-	return NewManagedCatalog(registry), nil
+	return newManagedCatalog(root, registry), nil
 }
 
 func NewManagedCatalog(registry *adapter.Registry) ManagedCatalog {
+	return newManagedCatalog("", registry)
+}
+
+func newManagedCatalog(root string, registry *adapter.Registry) ManagedCatalog {
 	return &registryManagedCatalog{
+		root:     root,
 		registry: registry,
 		builtIns: map[string]func(*reinv1.Adapter) ManagedAdapter{
 			muxadapter.AdapterID: func(descriptor *reinv1.Adapter) ManagedAdapter {
@@ -38,6 +43,7 @@ func NewManagedCatalog(registry *adapter.Registry) ManagedCatalog {
 }
 
 type registryManagedCatalog struct {
+	root     string
 	registry *adapter.Registry
 	builtIns map[string]func(*reinv1.Adapter) ManagedAdapter
 }
@@ -86,8 +92,11 @@ func (c *registryManagedCatalog) Lookup(id string) (ManagedAdapter, bool) {
 	if !ok {
 		return nil, false
 	}
-	if adapter, ok := builtinManagedAdapter(entry.Descriptor); ok {
-		return adapter, true
+	if managed, ok := builtinManagedAdapter(entry.Descriptor); ok {
+		return managed, true
+	}
+	if factory, ok := managedAdapterFactories[id]; ok {
+		return factory(c.root, entry.Descriptor), true
 	}
 	return &registryManagedAdapter{descriptor: entry.Descriptor, source: entry.Source}, true
 }

@@ -102,45 +102,6 @@ func TestManagedWorkflowValidateAcceptsBuiltInMuxiterm(t *testing.T) {
 	}
 }
 
-func managedCatalogIDs(adapters []*reinv1.Adapter) []string {
-	ids := make([]string, 0, len(adapters))
-	for _, descriptor := range adapters {
-		ids = append(ids, descriptor.GetId())
-	}
-	return ids
-}
-
-func writeManagedCatalogMarketplace(t *testing.T, root string, document map[string]any) {
-	t.Helper()
-
-	raw, err := json.MarshalIndent(document, "", "  ")
-	if err != nil {
-		t.Fatalf("json.MarshalIndent(marketplace.json) error = %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(root, ".claude-plugin"), 0o755); err != nil {
-		t.Fatalf("MkdirAll(.claude-plugin) error = %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(root, ".claude-plugin", "marketplace.json"), raw, 0o644); err != nil {
-		t.Fatalf("WriteFile(marketplace.json) error = %v", err)
-	}
-}
-
-func writeManagedCatalogManifest(t *testing.T, root, name string, manifest map[string]any) {
-	t.Helper()
-
-	manifestDir := filepath.Join(root, "plugins", name, ".claude-plugin")
-	if err := os.MkdirAll(manifestDir, 0o755); err != nil {
-		t.Fatalf("MkdirAll(%q) error = %v", manifestDir, err)
-	}
-	raw, err := json.MarshalIndent(manifest, "", "  ")
-	if err != nil {
-		t.Fatalf("json.MarshalIndent(plugin.json) error = %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(manifestDir, "plugin.json"), raw, 0o644); err != nil {
-		t.Fatalf("WriteFile(plugin.json) error = %v", err)
-	}
-}
-
 func TestManagedCatalogRemoteAdapterReportsSourceRepo(t *testing.T) {
 	t.Parallel()
 
@@ -177,5 +138,103 @@ func TestManagedCatalogRemoteAdapterReportsSourceRepo(t *testing.T) {
 	want := `adapter "coding-claude-code" is registered from GitHub repo "earchibald/rein-adapter-claude-code", but remote managed execution is not wired into the daemon yet`
 	if err == nil || err.Error() != want {
 		t.Fatalf("Run() error = %v, want %q", err, want)
+	}
+}
+
+func TestManagedCatalogWrapsBuiltInGitHubTracker(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeManagedCatalogMarketplace(t, root, map[string]any{
+		"name": "rein-fixture",
+		"plugins": []any{
+			map[string]any{
+				"name":             githubTrackerAdapterID,
+				"source":           "./plugins/" + githubTrackerAdapterID,
+				"version":          "0.1.0",
+				"description":      "Fixture GitHub tracker adapter",
+				"category":         "tracker",
+				"daemonApiVersion": adapter.CurrentDaemonAPIVersion,
+				"capabilities": map[string]string{
+					"issue.sync":               "true",
+					"branch.prepare":           "true",
+					"worktree.create":          "true",
+					"pull_request":             "true",
+					"pull_request_review.poll": "true",
+					"merge":                    "true",
+				},
+			},
+		},
+	})
+	writeManagedCatalogManifest(t, root, githubTrackerAdapterID, map[string]any{
+		"name":             githubTrackerAdapterID,
+		"version":          "0.1.0",
+		"description":      "Fixture GitHub tracker adapter",
+		"category":         "tracker",
+		"daemonApiVersion": adapter.CurrentDaemonAPIVersion,
+		"capabilities": map[string]string{
+			"issue.sync":               "true",
+			"branch.prepare":           "true",
+			"worktree.create":          "true",
+			"pull_request":             "true",
+			"pull_request_review.poll": "true",
+			"merge":                    "true",
+		},
+	})
+
+	catalog, err := NewManagedCatalogFromRoot(root, adapter.DiscoveryOptions{AllowUnsignedIndex: true})
+	if err != nil {
+		t.Fatalf("NewManagedCatalogFromRoot() error = %v", err)
+	}
+
+	managed, ok := catalog.Lookup(githubTrackerAdapterID)
+	if !ok {
+		t.Fatalf("Lookup(%q) = !ok", githubTrackerAdapterID)
+	}
+	if _, ok := managed.(*githubTrackerAdapter); !ok {
+		t.Fatalf("Lookup(%q) type = %T, want *githubTrackerAdapter", githubTrackerAdapterID, managed)
+	}
+
+	if got, want := managedCatalogIDs(catalog.List()), []string{muxadapter.AdapterID, githubTrackerAdapterID}; !slices.Equal(got, want) {
+		t.Fatalf("List() ids = %v, want %v", got, want)
+	}
+}
+
+func managedCatalogIDs(adapters []*reinv1.Adapter) []string {
+	ids := make([]string, 0, len(adapters))
+	for _, descriptor := range adapters {
+		ids = append(ids, descriptor.GetId())
+	}
+	return ids
+}
+
+func writeManagedCatalogMarketplace(t *testing.T, root string, document map[string]any) {
+	t.Helper()
+
+	raw, err := json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		t.Fatalf("json.MarshalIndent(marketplace.json) error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".claude-plugin"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(.claude-plugin) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".claude-plugin", "marketplace.json"), raw, 0o644); err != nil {
+		t.Fatalf("WriteFile(marketplace.json) error = %v", err)
+	}
+}
+
+func writeManagedCatalogManifest(t *testing.T, root, name string, manifest map[string]any) {
+	t.Helper()
+
+	manifestDir := filepath.Join(root, "plugins", name, ".claude-plugin")
+	if err := os.MkdirAll(manifestDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", manifestDir, err)
+	}
+	raw, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		t.Fatalf("json.MarshalIndent(plugin.json) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(manifestDir, "plugin.json"), raw, 0o644); err != nil {
+		t.Fatalf("WriteFile(plugin.json) error = %v", err)
 	}
 }
