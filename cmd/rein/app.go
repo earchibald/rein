@@ -677,6 +677,8 @@ func (a *app) printTUIHelp() {
 	fmt.Fprintln(a.stderr, "Keys:")
 	fmt.Fprintln(a.stderr, "  tab / shift+tab  Change focus between projects, issues, and executions.")
 	fmt.Fprintln(a.stderr, "  up/down          Move the selected row in the focused list.")
+	fmt.Fprintln(a.stderr, "  pgup/pgdown      Scroll the overview/drilldown pane when it overflows.")
+	fmt.Fprintln(a.stderr, "  home/end         Jump to the top or bottom of the overview/drilldown pane.")
 	fmt.Fprintln(a.stderr, "  enter            Toggle compact vs expanded execution drilldown.")
 	fmt.Fprintln(a.stderr, "  r                Refresh daemon data.")
 	fmt.Fprintln(a.stderr, "  q                Quit.")

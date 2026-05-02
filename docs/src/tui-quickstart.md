@@ -33,11 +33,13 @@ The shipped keymap is intentionally small:
 
 - `tab` / `shift+tab` — move focus between **Projects**, **Issues**, and **Executions**
 - `up` / `down` — move the selected row in the focused list
+- `pgup` / `pgdown` — scroll the right-side overview/drilldown pane when it overflows
+- `home` / `end` — jump to the top or bottom of the right-side overview/drilldown pane
 - `enter` — toggle compact vs expanded execution drilldown
 - `r` — refresh immediately
 - `q` or `ctrl+c` — quit
 
-The TUI also auto-refreshes on a short interval, so you can leave it open while another terminal mutates daemon state.
+The TUI keeps the selected execution drilldown fresh on a short interval, while broader project/issue/execution list refreshes run on a longer cadence so non-trivial instances do not pay for a full reload every five seconds.
 
 ## 4. What the layout shows
 
@@ -54,6 +56,8 @@ The right side is the overview/drilldown panel. Depending on what is selected, i
 - the selected issue status, priority, assignee, and workflow reference
 - workflow step status for the related workflow
 - execution drilldown, including task steps, side effects, metadata, and looking-glass state
+
+When the right-side pane has more content than fits, the TUI shows `↑ … above` / `↓ … more` indicators so it is obvious when additional drilldown content is available off-screen.
 
 ## 5. Looking glass expectations
 

@@ -151,6 +151,7 @@ mdbook serve docs
 
 - `rein tui` reads projects, issues, executions, workflow drilldown, and adapter capability state over the canonical gRPC API.
 - Execution drilldown includes workflow steps, side effects, execution metadata, and looking-glass status for any adapter that advertises `capabilities.tail=true`.
+- The overview/drilldown pane is scrollable with visible overflow indicators, and auto-refresh keeps selected execution detail live without reloading every dataset every five seconds.
 - Looking-glass tailing is capability-gated: when adapters advertise tail support but the daemon cannot stream it yet, the TUI shows that state instead of assuming live tail availability.
 
 ## Marketplace bootstrap
