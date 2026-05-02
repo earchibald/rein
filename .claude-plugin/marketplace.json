@@ -25,11 +25,19 @@
       "name": "messaging-null",
       "source": "./plugins/messaging-null",
       "version": "0.1.0"
+    },
+    {
+      "category": "mux",
+      "daemonApiVersion": "rein.v1",
+      "description": "First-party mux adapter backed by the muxiterm JSON CLI.",
+      "name": "muxiterm",
+      "source": "./plugins/muxiterm",
+      "version": "0.9.0"
     }
   ],
   "signature": {
     "algorithm": "ed25519",
-    "keyId": "rein-marketplace-phase4",
-    "value": "IniJumkkqBHuZ+e+R4FGpF2aG2a0HlGPOWMp+1TyQdGFWbn0AOR0OYoX2FixmOQeUM6yGVsO6timE7ckklmOBw=="
+    "keyId": "rein-marketplace-phase4b",
+    "value": "HJk3K9IYNJk3WKTu43FIjbF61JmH9yiWFmLAnBEbryF1Nw0NpgPgXeydl3TE3r9eYqeAkn+UQt3Nq0eR+QPRAw=="
   }
 }

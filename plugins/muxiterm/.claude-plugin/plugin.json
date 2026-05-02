@@ -1,0 +1,13 @@
+{
+  "name": "muxiterm",
+  "version": "0.9.0",
+  "description": "First-party mux adapter backed by the muxiterm JSON CLI.",
+  "category": "mux",
+  "daemonApiVersion": "rein.v1",
+  "capabilities": {
+    "session.attach": "true",
+    "pane.split": "true",
+    "input.send": "true",
+    "tail": "true"
+  }
+}

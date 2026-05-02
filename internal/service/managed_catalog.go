@@ -3,12 +3,14 @@ package service
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"google.golang.org/protobuf/proto"
 
 	reinv1 "github.com/earchibald/rein/gen/go/rein/v1"
 	"github.com/earchibald/rein/internal/adapter"
+	muxadapter "github.com/earchibald/rein/internal/adapter/muxiterm"
 	"github.com/earchibald/rein/internal/workflow"
 )
 
@@ -21,26 +23,66 @@ func NewManagedCatalogFromRoot(root string, options adapter.DiscoveryOptions) (M
 }
 
 func NewManagedCatalog(registry *adapter.Registry) ManagedCatalog {
-	return &registryManagedCatalog{registry: registry}
+	return &registryManagedCatalog{
+		registry: registry,
+		builtIns: map[string]func(*reinv1.Adapter) ManagedAdapter{
+			muxadapter.AdapterID: func(descriptor *reinv1.Adapter) ManagedAdapter {
+				managed := muxadapter.New()
+				if descriptor != nil {
+					return managed.WithDescriptor(descriptor)
+				}
+				return managed
+			},
+		},
+	}
 }
 
 type registryManagedCatalog struct {
 	registry *adapter.Registry
+	builtIns map[string]func(*reinv1.Adapter) ManagedAdapter
 }
 
 func (c *registryManagedCatalog) List() []*reinv1.Adapter {
-	if c == nil || c.registry == nil {
+	if c == nil {
 		return nil
 	}
-	return c.registry.List(reinv1.AdapterCategory_ADAPTER_CATEGORY_UNSPECIFIED, false)
+
+	descriptors := map[string]*reinv1.Adapter{}
+	if c.registry != nil {
+		for _, descriptor := range c.registry.List(reinv1.AdapterCategory_ADAPTER_CATEGORY_UNSPECIFIED, false) {
+			descriptors[descriptor.GetId()] = descriptor
+		}
+	}
+	for id, factory := range c.builtIns {
+		descriptors[id] = factory(descriptors[id]).Descriptor()
+	}
+
+	ids := make([]string, 0, len(descriptors))
+	for id := range descriptors {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+
+	list := make([]*reinv1.Adapter, 0, len(ids))
+	for _, id := range ids {
+		list = append(list, descriptors[id])
+	}
+	return list
 }
 
 func (c *registryManagedCatalog) Lookup(id string) (ManagedAdapter, bool) {
-	if c == nil || c.registry == nil {
+	if c == nil {
 		return nil, false
 	}
 
-	entry, ok := c.registry.Entry(id)
+	var entry adapter.Entry
+	var ok bool
+	if c.registry != nil {
+		entry, ok = c.registry.Entry(id)
+	}
+	if factory, builtIn := c.builtIns[id]; builtIn {
+		return factory(entry.Descriptor), true
+	}
 	if !ok {
 		return nil, false
 	}

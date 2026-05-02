@@ -25,8 +25,10 @@ Modular orchestrator daemon — successor to op-obsidian. Go daemon + plural HMI
 
 ## Adapter registry
 
-- The repo ships an unsigned local marketplace index at `.claude-plugin/marketplace.json` for built-in adapter discovery during local daemon and doctor runs.
+- The repo ships a signed marketplace index at `.claude-plugin/marketplace.json` for built-in and remote adapter discovery.
+- Repository-local trusted public keys live at `.claude-plugin/trusted-keys.json`; the daemon and `rein doctor` load them automatically before verifying marketplace signatures.
 - `messaging-null` is a no-op notification adapter that advertises `messaging.post` so workflows can stay launchable until Slack and Discord adapters land.
+- The in-tree `muxiterm` multiplexer adapter manifest lives at `plugins/muxiterm/.claude-plugin/plugin.json` and advertises the bundled mux capability surface.
 
 ## TUI
 
@@ -37,7 +39,6 @@ Modular orchestrator daemon — successor to op-obsidian. Go daemon + plural HMI
 ## Marketplace bootstrap
 
 - Rein discovers adapters from `.claude-plugin/marketplace.json` at the repository root.
-- Repository-local signing keys live in `.claude-plugin/trusted-keys.json`; the daemon and `rein doctor` load them automatically before verifying the marketplace signature.
 - RN-23 boots the Claude Code coding-agent adapter as a remote GitHub marketplace entry (`earchibald/rein-adapter-claude-code`) instead of a local plugin checkout.
 - The registry and adapter APIs now surface that remote entry immediately; managed execution still reports an explicit “not wired yet” stub until the external adapter bridge lands.
 

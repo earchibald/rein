@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 
@@ -161,6 +162,30 @@ func TestNormalizeCategoryAliases(t *testing.T) {
 				t.Fatalf("NormalizeCategory() = %+v, want %+v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestLoadRepositoryMarketplaceMuxitermEntry(t *testing.T) {
+	t.Parallel()
+
+	root := repoRoot(t)
+	registry, err := Load(root, DiscoveryOptions{})
+	if err != nil {
+		t.Fatalf("Load(repo root) error = %v", err)
+	}
+
+	entry, ok := registry.Entry("muxiterm")
+	if !ok {
+		t.Fatal(`Entry("muxiterm") = !ok`)
+	}
+	if entry.MarketplaceCategory != CategoryMux {
+		t.Fatalf("MarketplaceCategory = %q, want %q", entry.MarketplaceCategory, CategoryMux)
+	}
+	if got := entry.Descriptor.GetCategory(); got != reinv1.AdapterCategory_ADAPTER_CATEGORY_MULTIPLEXER {
+		t.Fatalf("Descriptor.Category = %s, want %s", got, reinv1.AdapterCategory_ADAPTER_CATEGORY_MULTIPLEXER)
+	}
+	if got := entry.Descriptor.GetCapabilities()["tail"]; got != "true" {
+		t.Fatalf(`Descriptor.Capabilities["tail"] = %q, want %q`, got, "true")
 	}
 }
 
@@ -343,4 +368,14 @@ func trustedKeys() map[string]ed25519.PublicKey {
 func privateKey() ed25519.PrivateKey {
 	seed := []byte("rein-rn11-marketplace-signing-se")
 	return ed25519.NewKeyFromSeed(seed)
+}
+
+func repoRoot(t testing.TB) string {
+	t.Helper()
+
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller() = !ok")
+	}
+	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 }
