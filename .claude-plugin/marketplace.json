@@ -33,11 +33,27 @@
       "name": "muxiterm",
       "source": "./plugins/muxiterm",
       "version": "0.9.0"
+    },
+    {
+      "capabilities": {
+        "branch.prepare": "true",
+        "issue.sync": "true",
+        "merge": "true",
+        "pull_request": "true",
+        "pull_request_review.poll": "true",
+        "worktree.create": "true"
+      },
+      "category": "tracker",
+      "daemonApiVersion": "rein.v1",
+      "description": "First-party GitHub issue and pull-request tracker adapter",
+      "name": "tracker-github",
+      "source": "./plugins/tracker-github",
+      "version": "0.1.0"
     }
   ],
   "signature": {
     "algorithm": "ed25519",
-    "keyId": "rein-marketplace-phase4b",
-    "value": "HJk3K9IYNJk3WKTu43FIjbF61JmH9yiWFmLAnBEbryF1Nw0NpgPgXeydl3TE3r9eYqeAkn+UQt3Nq0eR+QPRAw=="
+    "keyId": "rein-marketplace-phase4c",
+    "value": "Hyz66N9T/BLG/xyTqm/SfWOn9d8HgDw+8Lg0wSvZMvg8xXbylBfWJcLNq5HG1tXv8Z+2Xes3oXBTQYsabNxsAw=="
   }
 }

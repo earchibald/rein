@@ -1,0 +1,15 @@
+{
+  "capabilities": {
+    "branch.prepare": "true",
+    "issue.sync": "true",
+    "merge": "true",
+    "pull_request": "true",
+    "pull_request_review.poll": "true",
+    "worktree.create": "true"
+  },
+  "category": "tracker",
+  "daemonApiVersion": "rein.v1",
+  "description": "First-party GitHub issue and pull-request tracker adapter",
+  "name": "tracker-github",
+  "version": "0.1.0"
+}
