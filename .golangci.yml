@@ -1,7 +1,4 @@
-version: "2"
-
 linters:
-  default: standard
   enable:
     - bodyclose
     - dogsled
@@ -27,22 +24,21 @@ linters:
     - unparam
     - unused
     - wastedassign
-  settings:
-    goimports:
-      local-prefixes: github.com/earchibald/rein
-    revive:
-      rules:
-        - name: exported
-          arguments:
-            - disableStutteringCheck
-    exhaustive:
-      default-signifies-exhaustive: true
 
 linters-settings:
   gocritic:
     enabled-tags:
       - diagnostic
       - style
+  goimports:
+    local-prefixes: github.com/earchibald/rein
+  revive:
+    rules:
+      - name: exported
+        arguments:
+          - disableStutteringCheck
+  exhaustive:
+    default-signifies-exhaustive: true
 
 issues:
   max-issues-per-linter: 50
