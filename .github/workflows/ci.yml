@@ -21,6 +21,11 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Lint and generate protobuf stubs
+        run: |
+          just proto
+          git diff --exit-code
+
       - name: Build
         run: go build ./...
 
