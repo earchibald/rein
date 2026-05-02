@@ -451,11 +451,12 @@ func (m model) renderDetail(width, height int) string {
 	}
 	if execution := m.selectedExecution(); execution != nil {
 		lines = append(lines, "", "Execution", fmt.Sprintf("  %s • %s", execution.GetId(), statusText(execution.GetStatus().String())), fmt.Sprintf("  requested by %s", fallback(execution.GetRequestedBy(), "unknown")))
-		if m.loadingDetail {
+		switch {
+		case m.loadingDetail:
 			lines = append(lines, "", "Drilldown loading…")
-		} else if m.detailErr != "" {
+		case m.detailErr != "":
 			lines = append(lines, "", "Drilldown unavailable", "  "+m.detailErr)
-		} else if m.detail != nil {
+		case m.detail != nil:
 			lines = append(lines, m.executionDetailLines()...)
 		}
 	}
@@ -631,9 +632,9 @@ func renderSelectableList(items []selectableItem, selectedID string, height int)
 }
 
 func renderPanel(title, body string, width, height int, focused bool) string {
-	style := panelStyle.Copy().Width(width).Height(height)
+	style := panelStyle.Width(width).Height(height)
 	if focused {
-		style = focusedPanelStyle.Copy().Width(width).Height(height)
+		style = focusedPanelStyle.Width(width).Height(height)
 	}
 	return style.Render(titleStyle.Render(title) + "\n" + clipLines(body, maxInt(1, height-2), width-4))
 }
@@ -793,15 +794,15 @@ func indexForID(id string, ids []string) int {
 	return 0
 }
 
-func visibleRange(total, selected, height int) (int, int) {
+func visibleRange(total, selected, height int) (start, end int) {
 	if total <= height {
 		return 0, total
 	}
-	start := selected - height/2
+	start = selected - height/2
 	if start < 0 {
 		start = 0
 	}
-	end := start + height
+	end = start + height
 	if end > total {
 		end = total
 		start = end - height

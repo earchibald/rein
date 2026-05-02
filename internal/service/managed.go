@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -756,7 +757,7 @@ func executionTaskSteps(steps []workflow.TaskStep, index map[string]*reinv1.Work
 			Direction: string(step.Direction),
 			Operation: step.Operation,
 			Status:    string(step.Status),
-			Sequence:  int32(step.Sequence),
+			Sequence:  boundedInt32(step.Sequence),
 			Error:     step.Error,
 		})
 	}
@@ -775,7 +776,7 @@ func executionSideEffects(effects []workflow.SideEffect, index map[string]*reinv
 			Direction:   string(effect.Direction),
 			Operation:   effect.Operation,
 			Status:      string(effect.Status),
-			Sequence:    int32(effect.Sequence),
+			Sequence:    boundedInt32(effect.Sequence),
 			Reason:      effect.Reason,
 			TargetPhase: effect.TargetPhase,
 			Inputs:      cloneMap(effect.Inputs),
@@ -837,6 +838,16 @@ func executionLookingGlass(adapters []*reinv1.Adapter) *reinv1.LookingGlassState
 		AdapterIds: tailAdapters,
 		Status:     "Adapters advertise tail support, but the daemon does not expose looking-glass streaming yet.",
 	}
+}
+
+func boundedInt32(value int) int32 {
+	if value > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if value < math.MinInt32 {
+		return math.MinInt32
+	}
+	return int32(value)
 }
 
 func workflowStepName(step *reinv1.WorkflowStep, fallback string) string {
