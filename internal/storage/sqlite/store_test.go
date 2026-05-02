@@ -6,6 +6,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/earchibald/rein/internal/settings"
 )
 
 func TestStoreCreateGetUpdateDelete(t *testing.T) {
@@ -199,5 +201,131 @@ func TestClonePayloadReturnsDistinctSlice(t *testing.T) {
 
 	if string(cloned) != `{"ok":true}` {
 		t.Fatalf("clonePayload() = %s", string(cloned))
+	}
+}
+
+func TestStoreSettingsProfilesCRUDAndResolve(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := openTestStore(t, ctx)
+	registry := settings.MustRegistry(
+		settings.KeySpec{Key: "runner.image", AllowedLayers: []settings.Layer{settings.LayerDaemonGlobal, settings.LayerProject, settings.LayerWorkflow, settings.LayerExecution}},
+		settings.KeySpec{Key: "notifications.email", AllowedLayers: []settings.Layer{settings.LayerDaemonGlobal, settings.LayerProject}},
+	)
+
+	daemonProfile, err := store.CreateSettingsProfile(ctx, registry, settings.LayerDaemonGlobal, "", map[string]string{
+		"runner.image":        "ubuntu-latest",
+		"notifications.email": "ops@example.com",
+	})
+	if err != nil {
+		t.Fatalf("CreateSettingsProfile() daemon error = %v", err)
+	}
+
+	projectProfile, err := store.CreateSettingsProfile(ctx, registry, settings.LayerProject, "project-1", map[string]string{
+		"notifications.email": "project@example.com",
+	})
+	if err != nil {
+		t.Fatalf("CreateSettingsProfile() project error = %v", err)
+	}
+
+	if _, err := store.CreateSettingsProfile(ctx, registry, settings.LayerWorkflow, "workflow-1", map[string]string{
+		"runner.image": "workflow-image",
+	}); err != nil {
+		t.Fatalf("CreateSettingsProfile() workflow error = %v", err)
+	}
+
+	executionProfile, err := store.CreateSettingsProfile(ctx, registry, settings.LayerExecution, "execution-1", map[string]string{
+		"runner.image": "execution-image",
+	})
+	if err != nil {
+		t.Fatalf("CreateSettingsProfile() execution error = %v", err)
+	}
+
+	gotProject, err := store.GetSettingsProfile(ctx, settings.LayerProject, "project-1")
+	if err != nil {
+		t.Fatalf("GetSettingsProfile() error = %v", err)
+	}
+	if gotProject.ScopeID != "project-1" || gotProject.Values["notifications.email"] != "project@example.com" {
+		t.Fatalf("GetSettingsProfile() = %+v", gotProject)
+	}
+
+	updatedProject, err := store.UpdateSettingsProfile(ctx, registry, settings.LayerProject, "project-1", projectProfile.LockVersion, map[string]string{
+		"notifications.email": "alerts@example.com",
+	})
+	if err != nil {
+		t.Fatalf("UpdateSettingsProfile() error = %v", err)
+	}
+	if updatedProject.LockVersion != projectProfile.LockVersion+1 {
+		t.Fatalf("UpdateSettingsProfile() lock version = %d, want %d", updatedProject.LockVersion, projectProfile.LockVersion+1)
+	}
+
+	resolved, err := store.ResolveSettings(ctx, registry, SettingsResolutionScope{
+		ProjectID:   "project-1",
+		WorkflowID:  "workflow-1",
+		ExecutionID: "execution-1",
+	})
+	if err != nil {
+		t.Fatalf("ResolveSettings() error = %v", err)
+	}
+	if got := resolved["runner.image"]; got.Value != "execution-image" || got.Layer != settings.LayerExecution {
+		t.Fatalf("ResolveSettings() runner.image = %+v, want execution override", got)
+	}
+	if got := resolved["notifications.email"]; got.Value != "alerts@example.com" || got.Layer != settings.LayerProject {
+		t.Fatalf("ResolveSettings() notifications.email = %+v, want project override", got)
+	}
+
+	if err := store.DeleteSettingsProfile(ctx, settings.LayerExecution, "execution-1", executionProfile.LockVersion); err != nil {
+		t.Fatalf("DeleteSettingsProfile() error = %v", err)
+	}
+
+	fallbackResolved, err := store.ResolveSettings(ctx, registry, SettingsResolutionScope{
+		ProjectID:   "project-1",
+		WorkflowID:  "workflow-1",
+		ExecutionID: "execution-1",
+	})
+	if err != nil {
+		t.Fatalf("ResolveSettings() after delete error = %v", err)
+	}
+	if got := fallbackResolved["runner.image"]; got.Value != "workflow-image" || got.Layer != settings.LayerWorkflow {
+		t.Fatalf("ResolveSettings() fallback runner.image = %+v, want workflow override", got)
+	}
+
+	if daemonProfile.ScopeID != settings.DaemonGlobalScopeID {
+		t.Fatalf("CreateSettingsProfile() daemon scope id = %q, want %q", daemonProfile.ScopeID, settings.DaemonGlobalScopeID)
+	}
+}
+
+func TestStoreSettingsProfileRejectsIneligibleLayer(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := openTestStore(t, ctx)
+	registry := settings.MustRegistry(
+		settings.KeySpec{Key: "notifications.email", AllowedLayers: []settings.Layer{settings.LayerDaemonGlobal, settings.LayerProject}},
+	)
+
+	_, err := store.CreateSettingsProfile(ctx, registry, settings.LayerExecution, "execution-1", map[string]string{
+		"notifications.email": "execution@example.com",
+	})
+	if !errors.Is(err, settings.ErrLayerNotAllowed) {
+		t.Fatalf("CreateSettingsProfile() error = %v, want %v", err, settings.ErrLayerNotAllowed)
+	}
+}
+
+func TestStoreSettingsProfileRejectsInvalidScopeID(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := openTestStore(t, ctx)
+	registry := settings.MustRegistry(
+		settings.KeySpec{Key: "runner.image", AllowedLayers: []settings.Layer{settings.LayerProject}},
+	)
+
+	_, err := store.CreateSettingsProfile(ctx, registry, settings.LayerProject, "", map[string]string{
+		"runner.image": "project-image",
+	})
+	if !errors.Is(err, settings.ErrInvalidScopeID) {
+		t.Fatalf("CreateSettingsProfile() error = %v, want %v", err, settings.ErrInvalidScopeID)
 	}
 }
