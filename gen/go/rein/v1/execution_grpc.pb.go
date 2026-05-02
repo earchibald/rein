@@ -19,10 +19,11 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ExecutionService_ListExecutions_FullMethodName  = "/rein.v1.ExecutionService/ListExecutions"
-	ExecutionService_GetExecution_FullMethodName    = "/rein.v1.ExecutionService/GetExecution"
-	ExecutionService_StartExecution_FullMethodName  = "/rein.v1.ExecutionService/StartExecution"
-	ExecutionService_CancelExecution_FullMethodName = "/rein.v1.ExecutionService/CancelExecution"
+	ExecutionService_ListExecutions_FullMethodName   = "/rein.v1.ExecutionService/ListExecutions"
+	ExecutionService_GetExecution_FullMethodName     = "/rein.v1.ExecutionService/GetExecution"
+	ExecutionService_InspectExecution_FullMethodName = "/rein.v1.ExecutionService/InspectExecution"
+	ExecutionService_StartExecution_FullMethodName   = "/rein.v1.ExecutionService/StartExecution"
+	ExecutionService_CancelExecution_FullMethodName  = "/rein.v1.ExecutionService/CancelExecution"
 )
 
 // ExecutionServiceClient is the client API for ExecutionService service.
@@ -35,6 +36,8 @@ type ExecutionServiceClient interface {
 	ListExecutions(ctx context.Context, in *ListExecutionsRequest, opts ...grpc.CallOption) (*ListExecutionsResponse, error)
 	// Get a single execution by id.
 	GetExecution(ctx context.Context, in *GetExecutionRequest, opts ...grpc.CallOption) (*GetExecutionResponse, error)
+	// Inspect an execution with workflow drilldown details.
+	InspectExecution(ctx context.Context, in *InspectExecutionRequest, opts ...grpc.CallOption) (*InspectExecutionResponse, error)
 	// Start a workflow execution for an issue.
 	StartExecution(ctx context.Context, in *StartExecutionRequest, opts ...grpc.CallOption) (*StartExecutionResponse, error)
 	// Cancel a running execution.
@@ -63,6 +66,16 @@ func (c *executionServiceClient) GetExecution(ctx context.Context, in *GetExecut
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetExecutionResponse)
 	err := c.cc.Invoke(ctx, ExecutionService_GetExecution_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *executionServiceClient) InspectExecution(ctx context.Context, in *InspectExecutionRequest, opts ...grpc.CallOption) (*InspectExecutionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InspectExecutionResponse)
+	err := c.cc.Invoke(ctx, ExecutionService_InspectExecution_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -99,6 +112,8 @@ type ExecutionServiceServer interface {
 	ListExecutions(context.Context, *ListExecutionsRequest) (*ListExecutionsResponse, error)
 	// Get a single execution by id.
 	GetExecution(context.Context, *GetExecutionRequest) (*GetExecutionResponse, error)
+	// Inspect an execution with workflow drilldown details.
+	InspectExecution(context.Context, *InspectExecutionRequest) (*InspectExecutionResponse, error)
 	// Start a workflow execution for an issue.
 	StartExecution(context.Context, *StartExecutionRequest) (*StartExecutionResponse, error)
 	// Cancel a running execution.
@@ -117,6 +132,9 @@ func (UnimplementedExecutionServiceServer) ListExecutions(context.Context, *List
 }
 func (UnimplementedExecutionServiceServer) GetExecution(context.Context, *GetExecutionRequest) (*GetExecutionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetExecution not implemented")
+}
+func (UnimplementedExecutionServiceServer) InspectExecution(context.Context, *InspectExecutionRequest) (*InspectExecutionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method InspectExecution not implemented")
 }
 func (UnimplementedExecutionServiceServer) StartExecution(context.Context, *StartExecutionRequest) (*StartExecutionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method StartExecution not implemented")
@@ -180,6 +198,24 @@ func _ExecutionService_GetExecution_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ExecutionService_InspectExecution_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InspectExecutionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ExecutionServiceServer).InspectExecution(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ExecutionService_InspectExecution_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ExecutionServiceServer).InspectExecution(ctx, req.(*InspectExecutionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ExecutionService_StartExecution_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(StartExecutionRequest)
 	if err := dec(in); err != nil {
@@ -230,6 +266,10 @@ var ExecutionService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetExecution",
 			Handler:    _ExecutionService_GetExecution_Handler,
+		},
+		{
+			MethodName: "InspectExecution",
+			Handler:    _ExecutionService_InspectExecution_Handler,
 		},
 		{
 			MethodName: "StartExecution",

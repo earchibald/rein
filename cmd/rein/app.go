@@ -28,6 +28,7 @@ import (
 	"github.com/earchibald/rein/internal/server"
 	"github.com/earchibald/rein/internal/service"
 	"github.com/earchibald/rein/internal/storage/sqlite"
+	"github.com/earchibald/rein/internal/tui"
 	protofiles "github.com/earchibald/rein/proto"
 )
 
@@ -92,6 +93,8 @@ func (a *app) run(args []string) error {
 		return a.runDoctor(root, remaining[1:])
 	case "describe-as":
 		return a.runDescribe(remaining)
+	case "tui":
+		return a.runTUI(root, remaining[1:])
 	default:
 		if strings.HasPrefix(remaining[0], "describe-as=") {
 			return a.runDescribe(remaining)
@@ -179,6 +182,31 @@ func (a *app) serveDaemon(config daemonServeConfig) error {
 	defer stop()
 
 	return runtime.Serve(ctx, listener)
+}
+
+func (a *app) runTUI(root rootConfig, args []string) error {
+	if len(args) == 1 && isHelpToken(args[0]) {
+		a.printTUIHelp()
+		return flag.ErrHelp
+	}
+	if len(args) != 0 {
+		return fmt.Errorf("unexpected arguments: %v", args)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), defaultRPCTimeout)
+	defer cancel()
+
+	conn, err := dialGRPC(ctx, root.client)
+	if err != nil {
+		return fmt.Errorf("connect to daemon: %w", err)
+	}
+	defer conn.Close()
+
+	return tui.Run(conn, tui.Options{
+		InstanceName: root.instance.Name,
+		Network:      root.client.Network,
+		Address:      root.client.Address,
+	})
 }
 
 func (a *app) runRPC(root rootConfig, args []string) error {
@@ -300,7 +328,7 @@ func loadRPCCommands() (map[string]rpcCommand, error) {
 }
 
 func methodVerb(name protoreflect.Name) (string, bool) {
-	for _, prefix := range []string{"List", "Get", "Create", "Update", "Start", "Cancel", "Validate"} {
+	for _, prefix := range []string{"List", "Get", "Inspect", "Create", "Update", "Start", "Cancel", "Validate"} {
 		if strings.HasPrefix(string(name), prefix) {
 			return strings.ToLower(prefix), true
 		}
@@ -438,6 +466,7 @@ func (a *app) printRootHelp() {
 	fmt.Fprintln(a.stderr, "  rein [global flags] daemon serve [flags]")
 	fmt.Fprintln(a.stderr, "  rein [global flags] doctor")
 	fmt.Fprintln(a.stderr, "  rein [global flags] describe-as=<format>")
+	fmt.Fprintln(a.stderr, "  rein [global flags] tui")
 	fmt.Fprintln(a.stderr)
 	fmt.Fprintln(a.stderr, "Global flags:")
 	for _, flag := range globalFlagDescriptions() {
@@ -464,6 +493,7 @@ func (a *app) printRootHelp() {
 		}
 	}
 	fmt.Fprintln(a.stderr)
+	fmt.Fprintln(a.stderr, "  tui\tTerminal UI over the canonical gRPC surface.")
 	fmt.Fprintln(a.stderr, "  daemon serve\tStart the daemon and expose the canonical gRPC surface.")
 	fmt.Fprintln(a.stderr, "  doctor\tEmit JSON diagnostics for daemon health and local instance readiness.")
 	fmt.Fprintln(a.stderr, "  describe-as=<format>\tEmit a stable machine-consumable surface description.")
@@ -497,6 +527,20 @@ func (a *app) printDoctorHelp() {
 	fmt.Fprintln(a.stderr, "Emit machine-parseable JSON diagnostics covering daemon reachability,")
 	fmt.Fprintln(a.stderr, "instance layout, adapter registry compatibility, credential readiness,")
 	fmt.Fprintln(a.stderr, "and SQLite migration state for the selected instance.")
+}
+
+func (a *app) printTUIHelp() {
+	fmt.Fprintln(a.stderr, "Usage:")
+	fmt.Fprintln(a.stderr, "  rein [global flags] tui")
+	fmt.Fprintln(a.stderr)
+	fmt.Fprintln(a.stderr, "Launch the terminal UI over the daemon's canonical gRPC API.")
+	fmt.Fprintln(a.stderr)
+	fmt.Fprintln(a.stderr, "Keys:")
+	fmt.Fprintln(a.stderr, "  tab / shift+tab  Change focus between projects, issues, and executions.")
+	fmt.Fprintln(a.stderr, "  up/down          Move the selected row in the focused list.")
+	fmt.Fprintln(a.stderr, "  enter            Toggle compact vs expanded execution drilldown.")
+	fmt.Fprintln(a.stderr, "  r                Refresh daemon data.")
+	fmt.Fprintln(a.stderr, "  q                Quit.")
 }
 
 func (a *app) printCommandHelp(command rpcCommand) {

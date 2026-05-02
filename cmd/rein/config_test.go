@@ -190,7 +190,7 @@ func TestAppCommandHelpUsesProtoComments(t *testing.T) {
 	}
 }
 
-func TestRootHelpListsDoctorAndDescribeCommands(t *testing.T) {
+func TestRootHelpListsDoctorDescribeAndTUICommands(t *testing.T) {
 	t.Parallel()
 
 	var stdout, stderr bytes.Buffer
@@ -209,9 +209,36 @@ func TestRootHelpListsDoctorAndDescribeCommands(t *testing.T) {
 		"doctor\tEmit JSON diagnostics",
 		"rein [global flags] describe-as=<format>",
 		"describe-as=<format>\tEmit a stable machine-consumable surface description.",
+		"tui\tTerminal UI over the canonical gRPC surface.",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("help output missing %q\n%s", want, output)
+		}
+	}
+}
+
+func TestAppTUIHelp(t *testing.T) {
+	t.Parallel()
+
+	var stdout, stderr bytes.Buffer
+	app := newApp(&stdout, &stderr, func(string) (string, bool) { return "", false }, func() (string, error) {
+		return "/Users/tester", nil
+	}, func() (string, error) {
+		return "/repo", nil
+	})
+
+	err := app.run([]string{"tui", "--help"})
+	if err != flag.ErrHelp {
+		t.Fatalf("run() error = %v, want %v", err, flag.ErrHelp)
+	}
+	output := stderr.String()
+	for _, want := range []string{
+		"rein [global flags] tui",
+		"Toggle compact vs expanded execution drilldown.",
+		"Refresh daemon data.",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("tui help missing %q\n%s", want, output)
 		}
 	}
 }
