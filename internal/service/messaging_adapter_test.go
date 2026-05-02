@@ -133,10 +133,10 @@ func TestManagedExecutionServerStartsWorkflowWithMessagingNullAdapter(t *testing
 			},
 		},
 	}
-	if _, err := createStoredProto(ctx, store, sqlite.IssueKind, issue.GetId(), issue); err != nil {
+	if err := createStoredProto(ctx, store, sqlite.IssueKind, issue.GetId(), issue); err != nil {
 		t.Fatalf("createStoredProto(issue) error = %v", err)
 	}
-	if _, err := createStoredProto(ctx, store, sqlite.WorkflowKind, definition.GetId(), definition); err != nil {
+	if err := createStoredProto(ctx, store, sqlite.WorkflowKind, definition.GetId(), definition); err != nil {
 		t.Fatalf("createStoredProto(workflow) error = %v", err)
 	}
 

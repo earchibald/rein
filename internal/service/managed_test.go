@@ -119,7 +119,7 @@ func TestManagedServersListAndUpdateResources(t *testing.T) {
 		{kind: sqlite.WorkflowKind, id: workflowOne.GetId(), msg: workflowOne},
 		{kind: sqlite.WorkflowKind, id: workflowTwo.GetId(), msg: workflowTwo},
 	} {
-		if _, err := createStoredProto(ctx, store, seed.kind, seed.id, seed.msg); err != nil {
+		if err := createStoredProto(ctx, store, seed.kind, seed.id, seed.msg); err != nil {
 			t.Fatalf("createStoredProto(%s) error = %v", seed.id, err)
 		}
 	}
@@ -259,4 +259,349 @@ func (a managedTestAdapter) Descriptor() *reinv1.Adapter {
 
 func (managedTestAdapter) Run(context.Context, *workflow.RuntimeState, workflow.Phase, workflow.Direction, *workflow.SideEffect) error {
 	return nil
+}
+
+type managedConcurrentUpdateAdapter struct {
+	descriptor *reinv1.Adapter
+	store      *sqlite.Store
+}
+
+func (a managedConcurrentUpdateAdapter) Descriptor() *reinv1.Adapter {
+	return a.descriptor
+}
+
+func (a managedConcurrentUpdateAdapter) Run(ctx context.Context, state *workflow.RuntimeState, _ workflow.Phase, _ workflow.Direction, _ *workflow.SideEffect) error {
+	issueServer := &ManagedIssueServer{store: a.store}
+	_, err := issueServer.UpdateIssue(ctx, &reinv1.UpdateIssueRequest{Issue: &reinv1.Issue{
+		Id:         state.Issue.GetId(),
+		ProjectId:  state.Issue.GetProjectId(),
+		Title:      state.Issue.GetTitle(),
+		Summary:    state.Issue.GetSummary(),
+		Status:     state.Issue.GetStatus(),
+		Priority:   state.Issue.GetPriority(),
+		WorkflowId: state.Issue.GetWorkflowId(),
+		Assignee:   state.Issue.GetAssignee(),
+		Labels:     map[string]string{"team": "core"},
+	}})
+	return err
+}
+
+func TestManagedExecutionServerStartExecutionCreateFailureDoesNotMutateIssueState(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store, err := sqlite.OpenInMemoryAndMigrate(ctx, t.Name())
+	if err != nil {
+		t.Fatalf("OpenInMemoryAndMigrate() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("Close() error = %v", err)
+		}
+	})
+
+	created := timestamppb.New(time.Date(2026, time.May, 2, 12, 0, 0, 0, time.UTC))
+	issue := &reinv1.Issue{
+		Id:          "RN-35",
+		ProjectId:   "project-rein",
+		Title:       "Execution integrity",
+		Status:      reinv1.IssueStatus_ISSUE_STATUS_OPEN,
+		WorkflowId:  "workflow-noop",
+		CreatedTime: created,
+		UpdatedTime: created,
+	}
+	workflowEntity := &reinv1.Workflow{
+		Id:          "workflow-noop",
+		Name:        "No-op workflow",
+		Version:     "v1",
+		CreatedTime: created,
+		UpdatedTime: created,
+		Steps: []*reinv1.WorkflowStep{{
+			Id:        "noop",
+			Name:      "No-op",
+			AdapterId: "noop",
+		}},
+	}
+	existingExecution := &reinv1.Execution{
+		Id:           "exec-rn-35-collision",
+		IssueId:      issue.GetId(),
+		WorkflowId:   workflowEntity.GetId(),
+		Status:       reinv1.ExecutionStatus_EXECUTION_STATUS_SUCCEEDED,
+		RequestedBy:  "copilot",
+		CreatedTime:  created,
+		StartedTime:  created,
+		FinishedTime: created,
+	}
+
+	for _, seed := range []struct {
+		kind sqlite.EntityKind
+		id   string
+		msg  proto.Message
+	}{
+		{kind: sqlite.IssueKind, id: issue.GetId(), msg: issue},
+		{kind: sqlite.WorkflowKind, id: workflowEntity.GetId(), msg: workflowEntity},
+		{kind: sqlite.ExecutionKind, id: existingExecution.GetId(), msg: existingExecution},
+	} {
+		if err := createStoredProto(ctx, store, seed.kind, seed.id, seed.msg); err != nil {
+			t.Fatalf("createStoredProto(%s) error = %v", seed.id, err)
+		}
+	}
+
+	server := &ManagedExecutionServer{
+		catalog: managedTestCatalog{adapters: map[string]ManagedAdapter{
+			"noop": managedTestAdapter{descriptor: &reinv1.Adapter{Id: "noop", Enabled: true}},
+		}},
+		engine:         workflow.New(store),
+		store:          store,
+		newExecutionID: func(string) string { return existingExecution.GetId() },
+	}
+
+	if _, err := server.StartExecution(ctx, &reinv1.StartExecutionRequest{
+		IssueId:     issue.GetId(),
+		WorkflowId:  workflowEntity.GetId(),
+		RequestedBy: "copilot",
+	}); err == nil {
+		t.Fatal("StartExecution() error = nil, want collision failure")
+	}
+
+	storedIssue := &reinv1.Issue{}
+	if _, err := loadStoredProto(ctx, store, sqlite.IssueKind, issue.GetId(), storedIssue); err != nil {
+		t.Fatalf("loadStoredProto(issue) error = %v", err)
+	}
+	normalizeIssue(storedIssue)
+	if got := storedIssue.GetStatus(); got != reinv1.IssueStatus_ISSUE_STATUS_OPEN {
+		t.Fatalf("stored issue status = %s, want open", got)
+	}
+	if storedIssue.GetDaemonState() != nil {
+		t.Fatalf("stored issue daemon_state = %+v, want nil", storedIssue.GetDaemonState())
+	}
+}
+
+func TestManagedExecutionServerStartExecutionGeneratesUniqueIDsAcrossRetries(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store, err := sqlite.OpenInMemoryAndMigrate(ctx, t.Name())
+	if err != nil {
+		t.Fatalf("OpenInMemoryAndMigrate() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("Close() error = %v", err)
+		}
+	})
+
+	created := timestamppb.New(time.Date(2026, time.May, 2, 13, 0, 0, 0, time.UTC))
+	issue := &reinv1.Issue{
+		Id:          "RN-36",
+		ProjectId:   "project-rein",
+		Title:       "Retry execution",
+		Status:      reinv1.IssueStatus_ISSUE_STATUS_OPEN,
+		WorkflowId:  "workflow-noop",
+		CreatedTime: created,
+		UpdatedTime: created,
+	}
+	workflowEntity := &reinv1.Workflow{
+		Id:          "workflow-noop",
+		Name:        "No-op workflow",
+		Version:     "v1",
+		CreatedTime: created,
+		UpdatedTime: created,
+		Steps: []*reinv1.WorkflowStep{{
+			Id:        "noop",
+			Name:      "No-op",
+			AdapterId: "noop",
+		}},
+	}
+	if err := createStoredProto(ctx, store, sqlite.IssueKind, issue.GetId(), issue); err != nil {
+		t.Fatalf("createStoredProto(issue) error = %v", err)
+	}
+	if err := createStoredProto(ctx, store, sqlite.WorkflowKind, workflowEntity.GetId(), workflowEntity); err != nil {
+		t.Fatalf("createStoredProto(workflow) error = %v", err)
+	}
+
+	server := &ManagedExecutionServer{
+		catalog: managedTestCatalog{adapters: map[string]ManagedAdapter{
+			"noop": managedTestAdapter{descriptor: &reinv1.Adapter{Id: "noop", Enabled: true}},
+		}},
+		engine: workflow.New(store),
+		store:  store,
+	}
+
+	first, err := server.StartExecution(ctx, &reinv1.StartExecutionRequest{
+		IssueId:     issue.GetId(),
+		WorkflowId:  workflowEntity.GetId(),
+		RequestedBy: "copilot",
+	})
+	if err != nil {
+		t.Fatalf("StartExecution(first) error = %v", err)
+	}
+	second, err := server.StartExecution(ctx, &reinv1.StartExecutionRequest{
+		IssueId:     issue.GetId(),
+		WorkflowId:  workflowEntity.GetId(),
+		RequestedBy: "copilot",
+	})
+	if err != nil {
+		t.Fatalf("StartExecution(second) error = %v", err)
+	}
+	if first.GetExecution().GetId() == second.GetExecution().GetId() {
+		t.Fatalf("execution ids = %q and %q, want unique values", first.GetExecution().GetId(), second.GetExecution().GetId())
+	}
+
+	storedIssue := &reinv1.Issue{}
+	if _, err := loadStoredProto(ctx, store, sqlite.IssueKind, issue.GetId(), storedIssue); err != nil {
+		t.Fatalf("loadStoredProto(issue) error = %v", err)
+	}
+	normalizeIssue(storedIssue)
+	if got := storedIssue.GetDaemonState().GetExecutionId(); got != second.GetExecution().GetId() {
+		t.Fatalf("daemon_state.execution_id = %q, want %q", got, second.GetExecution().GetId())
+	}
+	if got := storedIssue.GetDaemonState().GetIntegrationStatus(); got != "merged" {
+		t.Fatalf("daemon_state.integration_status = %q, want merged", got)
+	}
+}
+
+func TestManagedIssueServerUpdatePreservesDaemonState(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store, err := sqlite.OpenInMemoryAndMigrate(ctx, t.Name())
+	if err != nil {
+		t.Fatalf("OpenInMemoryAndMigrate() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("Close() error = %v", err)
+		}
+	})
+
+	created := timestamppb.New(time.Date(2026, time.May, 2, 14, 0, 0, 0, time.UTC))
+	issue := &reinv1.Issue{
+		Id:          "RN-37",
+		ProjectId:   "project-rein",
+		Title:       "Preserve daemon state",
+		Status:      reinv1.IssueStatus_ISSUE_STATUS_OPEN,
+		Priority:    reinv1.IssuePriority_ISSUE_PRIORITY_HIGH,
+		WorkflowId:  "workflow-noop",
+		CreatedTime: created,
+		UpdatedTime: created,
+		DaemonState: &reinv1.IssueDaemonState{
+			ExecutionId:       "exec-rn-37-previous",
+			Branch:            "issues/rn-37-preserve-daemon-state",
+			IntegrationStatus: "running",
+		},
+	}
+	if err := createStoredProto(ctx, store, sqlite.IssueKind, issue.GetId(), issue); err != nil {
+		t.Fatalf("createStoredProto(issue) error = %v", err)
+	}
+
+	server := &ManagedIssueServer{store: store}
+	resp, err := server.UpdateIssue(ctx, &reinv1.UpdateIssueRequest{Issue: &reinv1.Issue{
+		Id:         issue.GetId(),
+		ProjectId:  issue.GetProjectId(),
+		Title:      "Preserve daemon state updated",
+		Summary:    "Labels should not clobber daemon state",
+		Status:     reinv1.IssueStatus_ISSUE_STATUS_IN_PROGRESS,
+		Priority:   issue.GetPriority(),
+		WorkflowId: issue.GetWorkflowId(),
+		Assignee:   "copilot",
+		Labels:     map[string]string{"team": "core"},
+	}})
+	if err != nil {
+		t.Fatalf("UpdateIssue() error = %v", err)
+	}
+
+	updated := resp.GetIssue()
+	if got := updated.GetDaemonState().GetExecutionId(); got != issue.GetDaemonState().GetExecutionId() {
+		t.Fatalf("daemon_state.execution_id = %q, want %q", got, issue.GetDaemonState().GetExecutionId())
+	}
+	if got := updated.GetDaemonState().GetBranch(); got != issue.GetDaemonState().GetBranch() {
+		t.Fatalf("daemon_state.branch = %q, want %q", got, issue.GetDaemonState().GetBranch())
+	}
+	if got := updated.GetLabels()["team"]; got != "core" {
+		t.Fatalf("labels[team] = %q, want core", got)
+	}
+	if got := updated.GetLabels()["branch"]; got != "" {
+		t.Fatalf("labels[branch] = %q, want empty", got)
+	}
+}
+
+func TestManagedExecutionServerMergesConcurrentIssueUpdatesBeforeCompletion(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store, err := sqlite.OpenInMemoryAndMigrate(ctx, t.Name())
+	if err != nil {
+		t.Fatalf("OpenInMemoryAndMigrate() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("Close() error = %v", err)
+		}
+	})
+
+	created := timestamppb.New(time.Date(2026, time.May, 2, 15, 0, 0, 0, time.UTC))
+	issue := &reinv1.Issue{
+		Id:          "RN-38",
+		ProjectId:   "project-rein",
+		Title:       "Merge concurrent updates",
+		Status:      reinv1.IssueStatus_ISSUE_STATUS_OPEN,
+		Priority:    reinv1.IssuePriority_ISSUE_PRIORITY_HIGH,
+		WorkflowId:  "workflow-concurrent",
+		CreatedTime: created,
+		UpdatedTime: created,
+	}
+	workflowEntity := &reinv1.Workflow{
+		Id:          "workflow-concurrent",
+		Name:        "Concurrent merge workflow",
+		Version:     "v1",
+		CreatedTime: created,
+		UpdatedTime: created,
+		Steps: []*reinv1.WorkflowStep{{
+			Id:        "concurrent",
+			Name:      "Concurrent issue update",
+			AdapterId: "concurrent",
+		}},
+	}
+	if err := createStoredProto(ctx, store, sqlite.IssueKind, issue.GetId(), issue); err != nil {
+		t.Fatalf("createStoredProto(issue) error = %v", err)
+	}
+	if err := createStoredProto(ctx, store, sqlite.WorkflowKind, workflowEntity.GetId(), workflowEntity); err != nil {
+		t.Fatalf("createStoredProto(workflow) error = %v", err)
+	}
+
+	server := &ManagedExecutionServer{
+		catalog: managedTestCatalog{adapters: map[string]ManagedAdapter{
+			"concurrent": managedConcurrentUpdateAdapter{
+				descriptor: &reinv1.Adapter{Id: "concurrent", Enabled: true},
+				store:      store,
+			},
+		}},
+		engine: workflow.New(store),
+		store:  store,
+	}
+
+	resp, err := server.StartExecution(ctx, &reinv1.StartExecutionRequest{
+		IssueId:     issue.GetId(),
+		WorkflowId:  workflowEntity.GetId(),
+		RequestedBy: "copilot",
+	})
+	if err != nil {
+		t.Fatalf("StartExecution() error = %v", err)
+	}
+	if got := resp.GetExecution().GetStatus(); got != reinv1.ExecutionStatus_EXECUTION_STATUS_SUCCEEDED {
+		t.Fatalf("execution status = %s, want succeeded", got)
+	}
+
+	storedIssue := &reinv1.Issue{}
+	if _, err := loadStoredProto(ctx, store, sqlite.IssueKind, issue.GetId(), storedIssue); err != nil {
+		t.Fatalf("loadStoredProto(issue) error = %v", err)
+	}
+	normalizeIssue(storedIssue)
+	if got := storedIssue.GetLabels()["team"]; got != "core" {
+		t.Fatalf("labels[team] = %q, want core", got)
+	}
+	if got := storedIssue.GetDaemonState().GetIntegrationStatus(); got != "merged" {
+		t.Fatalf("daemon_state.integration_status = %q, want merged", got)
+	}
 }

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -201,7 +202,7 @@ func (s *ManagedProjectServer) CreateProject(ctx context.Context, req *reinv1.Cr
 		project.CreatedTime = now
 	}
 	project.UpdatedTime = now
-	if _, err := createStoredProto(ctx, s.store, sqlite.ProjectKind, project.GetId(), project); err != nil {
+	if err := createStoredProto(ctx, s.store, sqlite.ProjectKind, project.GetId(), project); err != nil {
 		return nil, status.Errorf(codes.Internal, "create project %q: %v", project.GetId(), err)
 	}
 	return &reinv1.CreateProjectResponse{Project: project}, nil
@@ -248,7 +249,7 @@ func (s *ManagedProjectServer) UpdateProject(ctx context.Context, req *reinv1.Up
 	}
 	project.UpdatedTime = timestamppb.Now()
 
-	if _, err := updateStoredProto(ctx, s.store, sqlite.ProjectKind, project.GetId(), record.LockVersion, project); err != nil {
+	if err := updateStoredProto(ctx, s.store, sqlite.ProjectKind, project.GetId(), record.LockVersion, project); err != nil {
 		return nil, status.Errorf(codes.Internal, "update project %q: %v", project.GetId(), err)
 	}
 	return &reinv1.UpdateProjectResponse{Project: project}, nil
@@ -268,6 +269,7 @@ func (s *ManagedIssueServer) ListIssues(ctx context.Context, req *reinv1.ListIss
 	query := strings.ToLower(strings.TrimSpace(req.GetQuery()))
 	filtered := make([]*reinv1.Issue, 0, len(issues))
 	for _, issue := range issues {
+		normalizeIssue(issue)
 		if req.GetProjectId() != "" && issue.GetProjectId() != req.GetProjectId() {
 			continue
 		}
@@ -307,12 +309,13 @@ func (s *ManagedIssueServer) CreateIssue(ctx context.Context, req *reinv1.Create
 	if issue.Labels == nil {
 		issue.Labels = map[string]string{}
 	}
+	normalizeIssue(issue)
 	now := timestamppb.Now()
 	if issue.CreatedTime == nil {
 		issue.CreatedTime = now
 	}
 	issue.UpdatedTime = now
-	if _, err := createStoredProto(ctx, s.store, sqlite.IssueKind, issue.GetId(), issue); err != nil {
+	if err := createStoredProto(ctx, s.store, sqlite.IssueKind, issue.GetId(), issue); err != nil {
 		return nil, status.Errorf(codes.Internal, "create issue %q: %v", issue.GetId(), err)
 	}
 	return &reinv1.CreateIssueResponse{Issue: issue}, nil
@@ -326,6 +329,7 @@ func (s *ManagedIssueServer) GetIssue(ctx context.Context, req *reinv1.GetIssueR
 	if _, err := loadStoredProto(ctx, s.store, sqlite.IssueKind, req.GetId(), issue); err != nil {
 		return nil, toStatusError("issue", req.GetId(), err)
 	}
+	normalizeIssue(issue)
 	return &reinv1.GetIssueResponse{Issue: issue}, nil
 }
 
@@ -347,6 +351,8 @@ func (s *ManagedIssueServer) UpdateIssue(ctx context.Context, req *reinv1.Update
 	if err != nil {
 		return nil, toStatusError("issue", issue.GetId(), err)
 	}
+	normalizeIssue(current)
+	normalizeIssue(issue)
 
 	if issue.GetStatus() == reinv1.IssueStatus_ISSUE_STATUS_UNSPECIFIED {
 		issue.Status = current.GetStatus()
@@ -354,6 +360,7 @@ func (s *ManagedIssueServer) UpdateIssue(ctx context.Context, req *reinv1.Update
 	if issue.GetCreatedTime() == nil {
 		issue.CreatedTime = current.GetCreatedTime()
 	}
+	issue.DaemonState = cloneIssueDaemonState(current.GetDaemonState())
 	if issue.Labels == nil {
 		issue.Labels = cloneMap(current.GetLabels())
 	}
@@ -362,7 +369,7 @@ func (s *ManagedIssueServer) UpdateIssue(ctx context.Context, req *reinv1.Update
 	}
 	issue.UpdatedTime = timestamppb.Now()
 
-	if _, err := updateStoredProto(ctx, s.store, sqlite.IssueKind, issue.GetId(), record.LockVersion, issue); err != nil {
+	if err := updateStoredProto(ctx, s.store, sqlite.IssueKind, issue.GetId(), record.LockVersion, issue); err != nil {
 		return nil, status.Errorf(codes.Internal, "update issue %q: %v", issue.GetId(), err)
 	}
 	return &reinv1.UpdateIssueResponse{Issue: issue}, nil
@@ -370,9 +377,10 @@ func (s *ManagedIssueServer) UpdateIssue(ctx context.Context, req *reinv1.Update
 
 type ManagedExecutionServer struct {
 	reinv1.UnimplementedExecutionServiceServer
-	catalog ManagedCatalog
-	engine  *workflow.Engine
-	store   *sqlite.Store
+	catalog        ManagedCatalog
+	engine         *workflow.Engine
+	store          *sqlite.Store
+	newExecutionID func(string) string
 }
 
 func (s *ManagedExecutionServer) ListExecutions(ctx context.Context, req *reinv1.ListExecutionsRequest) (*reinv1.ListExecutionsResponse, error) {
@@ -412,6 +420,7 @@ func (s *ManagedExecutionServer) StartExecution(ctx context.Context, req *reinv1
 	if err != nil {
 		return nil, toStatusError("issue", req.GetIssueId(), err)
 	}
+	normalizeIssue(issue)
 	workflowEntity := &reinv1.Workflow{}
 	if _, err := loadStoredProto(ctx, s.store, sqlite.WorkflowKind, req.GetWorkflowId(), workflowEntity); err != nil {
 		return nil, toStatusError("workflow", req.GetWorkflowId(), err)
@@ -424,26 +433,30 @@ func (s *ManagedExecutionServer) StartExecution(ctx context.Context, req *reinv1
 	if len(messages) > 0 {
 		return nil, status.Errorf(codes.FailedPrecondition, "workflow %q is invalid", workflowEntity.GetId())
 	}
+	if runningExecution, err := s.runningExecutionForIssue(ctx, issue.GetId()); err != nil {
+		return nil, status.Errorf(codes.Internal, "list running executions for issue %q: %v", issue.GetId(), err)
+	} else if runningExecution != nil {
+		return nil, status.Errorf(codes.FailedPrecondition, "issue %q already has running execution %q", issue.GetId(), runningExecution.GetId())
+	}
 
 	now := timestamppb.Now()
+	nextExecutionID := executionID
+	if s.newExecutionID != nil {
+		nextExecutionID = s.newExecutionID
+	}
+	resetIssueDaemonState(issue, nextExecutionID(req.GetIssueId()))
 	issue.Status = reinv1.IssueStatus_ISSUE_STATUS_IN_PROGRESS
 	issue.UpdatedTime = now
-	if issue.Labels == nil {
-		issue.Labels = map[string]string{}
-	}
-	issue.Labels["integration_status"] = "running"
-	issueRecord, err = updateStoredProto(ctx, s.store, sqlite.IssueKind, issue.GetId(), issueRecord.LockVersion, issue)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "update issue %q: %v", issue.GetId(), err)
-	}
 
 	execution := &reinv1.Execution{
-		Id:          executionID(req.GetIssueId()),
+		Id:          issue.GetDaemonState().GetExecutionId(),
 		IssueId:     issue.GetId(),
 		WorkflowId:  workflowEntity.GetId(),
+		AdapterId:   firstWorkflowAdapterID(workflowEntity),
 		RequestedBy: req.GetRequestedBy(),
-		Status:      reinv1.ExecutionStatus_EXECUTION_STATUS_QUEUED,
+		Status:      reinv1.ExecutionStatus_EXECUTION_STATUS_RUNNING,
 		CreatedTime: now,
+		StartedTime: now,
 		Metadata:    cloneMap(req.GetInputs()),
 	}
 	if execution.Metadata == nil {
@@ -452,18 +465,8 @@ func (s *ManagedExecutionServer) StartExecution(ctx context.Context, req *reinv1
 	if execution.Metadata["base_branch"] == "" {
 		execution.Metadata["base_branch"] = "main"
 	}
-	executionRecord, err := createStoredProto(ctx, s.store, sqlite.ExecutionKind, execution.GetId(), execution)
-	if err != nil {
+	if _, _, err := createExecutionAndUpdateIssueAtomic(ctx, s.store, issueRecord, issue, execution); err != nil {
 		return nil, status.Errorf(codes.Internal, "create execution %q: %v", execution.GetId(), err)
-	}
-
-	firstAdapter, _ := firstWorkflowAdapter(workflowEntity)
-	execution.AdapterId = firstAdapter
-	execution.Status = reinv1.ExecutionStatus_EXECUTION_STATUS_RUNNING
-	execution.StartedTime = now
-	executionRecord, err = updateStoredProto(ctx, s.store, sqlite.ExecutionKind, execution.GetId(), executionRecord.LockVersion, execution)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "start execution %q: %v", execution.GetId(), err)
 	}
 
 	state := &workflow.RuntimeState{Workflow: workflowEntity, Issue: issue, Execution: execution}
@@ -474,11 +477,20 @@ func (s *ManagedExecutionServer) StartExecution(ctx context.Context, req *reinv1
 		execution.Metadata["result"] = "failed"
 		issue.Status = reinv1.IssueStatus_ISSUE_STATUS_BLOCKED
 		issue.UpdatedTime = timestamppb.Now()
-		issue.Labels["integration_status"] = "failed"
-		if _, updateErr := updateStoredProto(ctx, s.store, sqlite.ExecutionKind, execution.GetId(), executionRecord.LockVersion, execution); updateErr != nil {
-			return nil, status.Errorf(codes.Internal, "execution %q failed with %v and could not be stored: %v", execution.GetId(), err, updateErr)
+		ensureIssueDaemonState(issue).IntegrationStatus = "failed"
+		latestIssue := &reinv1.Issue{}
+		latestIssueRecord, loadErr := loadStoredProto(ctx, s.store, sqlite.IssueKind, issue.GetId(), latestIssue)
+		if loadErr != nil {
+			return nil, status.Errorf(codes.Internal, "reload issue %q after workflow failure: %v", issue.GetId(), loadErr)
 		}
-		if _, updateErr := updateStoredProto(ctx, s.store, sqlite.IssueKind, issue.GetId(), issueRecord.LockVersion, issue); updateErr != nil {
+		latestExecution := &reinv1.Execution{}
+		latestExecutionRecord, loadErr := loadStoredProto(ctx, s.store, sqlite.ExecutionKind, execution.GetId(), latestExecution)
+		if loadErr != nil {
+			return nil, status.Errorf(codes.Internal, "reload execution %q after workflow failure: %v", execution.GetId(), loadErr)
+		}
+		issue = mergeIssueForPersistence(latestIssue, issue)
+		execution = mergeExecutionForPersistence(latestExecution, execution)
+		if updateErr := updateIssueAndExecutionAtomic(ctx, s.store, latestIssueRecord, issue, latestExecutionRecord, execution); updateErr != nil {
 			return nil, status.Errorf(codes.Internal, "issue %q failed with %v and could not be stored: %v", issue.GetId(), err, updateErr)
 		}
 		return nil, status.Errorf(codes.FailedPrecondition, "run workflow %q: %v", workflowEntity.GetId(), err)
@@ -489,16 +501,25 @@ func (s *ManagedExecutionServer) StartExecution(ctx context.Context, req *reinv1
 	if execution.Metadata["result"] == "" {
 		execution.Metadata["result"] = "succeeded"
 	}
-	issue.Labels["integration_status"] = execution.Metadata["result"]
-	if issue.Labels["integration_status"] == "succeeded" {
-		issue.Labels["integration_status"] = "merged"
+	ensureIssueDaemonState(issue).IntegrationStatus = execution.Metadata["result"]
+	if issue.GetDaemonState().GetIntegrationStatus() == "succeeded" {
+		issue.DaemonState.IntegrationStatus = "merged"
 	}
 	execution.Status = reinv1.ExecutionStatus_EXECUTION_STATUS_SUCCEEDED
 	execution.FinishedTime = timestamppb.Now()
-	if _, err := updateStoredProto(ctx, s.store, sqlite.IssueKind, issue.GetId(), issueRecord.LockVersion, issue); err != nil {
-		return nil, status.Errorf(codes.Internal, "resolve issue %q: %v", issue.GetId(), err)
+	latestIssue := &reinv1.Issue{}
+	latestIssueRecord, err := loadStoredProto(ctx, s.store, sqlite.IssueKind, issue.GetId(), latestIssue)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "reload issue %q before completion: %v", issue.GetId(), err)
 	}
-	if _, err := updateStoredProto(ctx, s.store, sqlite.ExecutionKind, execution.GetId(), executionRecord.LockVersion, execution); err != nil {
+	latestExecution := &reinv1.Execution{}
+	latestExecutionRecord, err := loadStoredProto(ctx, s.store, sqlite.ExecutionKind, execution.GetId(), latestExecution)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "reload execution %q before completion: %v", execution.GetId(), err)
+	}
+	issue = mergeIssueForPersistence(latestIssue, issue)
+	execution = mergeExecutionForPersistence(latestExecution, execution)
+	if err := updateIssueAndExecutionAtomic(ctx, s.store, latestIssueRecord, issue, latestExecutionRecord, execution); err != nil {
 		return nil, status.Errorf(codes.Internal, "finish execution %q: %v", execution.GetId(), err)
 	}
 	return &reinv1.StartExecutionResponse{Execution: execution}, nil
@@ -529,6 +550,7 @@ func (s *ManagedExecutionServer) InspectExecution(ctx context.Context, req *rein
 	if _, err := loadStoredProto(ctx, s.store, sqlite.IssueKind, execution.GetIssueId(), issue); err != nil {
 		return nil, toStatusError("issue", execution.GetIssueId(), err)
 	}
+	normalizeIssue(issue)
 
 	workflowEntity := &reinv1.Workflow{}
 	if _, err := loadStoredProto(ctx, s.store, sqlite.WorkflowKind, execution.GetWorkflowId(), workflowEntity); err != nil {
@@ -563,7 +585,7 @@ func (s *ManagedExecutionServer) CancelExecution(ctx context.Context, req *reinv
 		return nil, status.Error(codes.InvalidArgument, "id is required")
 	}
 	execution := &reinv1.Execution{}
-	executionRecord, err := loadStoredProto(ctx, s.store, sqlite.ExecutionKind, req.GetId(), execution)
+	_, err := loadStoredProto(ctx, s.store, sqlite.ExecutionKind, req.GetId(), execution)
 	if err != nil {
 		return nil, toStatusError("execution", req.GetId(), err)
 	}
@@ -571,7 +593,7 @@ func (s *ManagedExecutionServer) CancelExecution(ctx context.Context, req *reinv
 		return nil, status.Errorf(codes.FailedPrecondition, "execution %q is not running", execution.GetId())
 	}
 	issue := &reinv1.Issue{}
-	issueRecord, err := loadStoredProto(ctx, s.store, sqlite.IssueKind, execution.GetIssueId(), issue)
+	_, err = loadStoredProto(ctx, s.store, sqlite.IssueKind, execution.GetIssueId(), issue)
 	if err != nil {
 		return nil, toStatusError("issue", execution.GetIssueId(), err)
 	}
@@ -592,14 +614,21 @@ func (s *ManagedExecutionServer) CancelExecution(ctx context.Context, req *reinv
 	execution.Metadata["cancel_reason"] = req.GetReason()
 	issue.Status = reinv1.IssueStatus_ISSUE_STATUS_CANCELED
 	issue.UpdatedTime = timestamppb.Now()
-	if issue.Labels == nil {
-		issue.Labels = map[string]string{}
+	ensureIssueDaemonState(issue).ExecutionId = execution.GetId()
+	issue.DaemonState.IntegrationStatus = "canceled"
+	latestIssue := &reinv1.Issue{}
+	latestIssueRecord, err := loadStoredProto(ctx, s.store, sqlite.IssueKind, issue.GetId(), latestIssue)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "reload issue %q before cancel persistence: %v", issue.GetId(), err)
 	}
-	issue.Labels["integration_status"] = "canceled"
-	if _, err := updateStoredProto(ctx, s.store, sqlite.ExecutionKind, execution.GetId(), executionRecord.LockVersion, execution); err != nil {
-		return nil, status.Errorf(codes.Internal, "persist canceled execution %q: %v", execution.GetId(), err)
+	latestExecution := &reinv1.Execution{}
+	latestExecutionRecord, err := loadStoredProto(ctx, s.store, sqlite.ExecutionKind, execution.GetId(), latestExecution)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "reload execution %q before cancel persistence: %v", execution.GetId(), err)
 	}
-	if _, err := updateStoredProto(ctx, s.store, sqlite.IssueKind, issue.GetId(), issueRecord.LockVersion, issue); err != nil {
+	issue = mergeIssueForPersistence(latestIssue, issue)
+	execution = mergeExecutionForPersistence(latestExecution, execution)
+	if err := updateIssueAndExecutionAtomic(ctx, s.store, latestIssueRecord, issue, latestExecutionRecord, execution); err != nil {
 		return nil, status.Errorf(codes.Internal, "persist canceled issue %q: %v", issue.GetId(), err)
 	}
 	return &reinv1.CancelExecutionResponse{Execution: execution}, nil
@@ -615,20 +644,22 @@ func (r catalogRunner) Run(ctx context.Context, state *workflow.RuntimeState, ph
 	return adapter.Run(ctx, state, phase, direction, effect)
 }
 
-func createStoredProto(ctx context.Context, store *sqlite.Store, kind sqlite.EntityKind, id string, message proto.Message) (sqlite.Record, error) {
+func createStoredProto(ctx context.Context, store *sqlite.Store, kind sqlite.EntityKind, id string, message proto.Message) error {
 	payload, err := protojson.Marshal(message)
 	if err != nil {
-		return sqlite.Record{}, err
+		return err
 	}
-	return store.Create(ctx, kind, id, payload)
+	_, err = store.Create(ctx, kind, id, payload)
+	return err
 }
 
-func updateStoredProto(ctx context.Context, store *sqlite.Store, kind sqlite.EntityKind, id string, lockVersion int64, message proto.Message) (sqlite.Record, error) {
+func updateStoredProto(ctx context.Context, store *sqlite.Store, kind sqlite.EntityKind, id string, lockVersion int64, message proto.Message) error {
 	payload, err := protojson.Marshal(message)
 	if err != nil {
-		return sqlite.Record{}, err
+		return err
 	}
-	return store.Update(ctx, kind, id, lockVersion, payload)
+	_, err = store.Update(ctx, kind, id, lockVersion, payload)
+	return err
 }
 
 func loadStoredProto(ctx context.Context, store *sqlite.Store, kind sqlite.EntityKind, id string, message proto.Message) (sqlite.Record, error) {
@@ -722,7 +753,23 @@ func matchesQuery(query string, candidates ...string) bool {
 }
 
 func executionID(issueID string) string {
-	return fmt.Sprintf("exec-%s-001", strings.ToLower(issueID))
+	return fmt.Sprintf("exec-%s-%s", strings.ToLower(issueID), uuid.NewString())
+}
+
+func (s *ManagedExecutionServer) runningExecutionForIssue(ctx context.Context, issueID string) (*reinv1.Execution, error) {
+	executions, err := listStoredMessages(ctx, s.store, sqlite.ExecutionKind, func() *reinv1.Execution { return &reinv1.Execution{} })
+	if err != nil {
+		return nil, err
+	}
+	for _, execution := range executions {
+		if execution.GetIssueId() != issueID {
+			continue
+		}
+		if execution.GetStatus() == reinv1.ExecutionStatus_EXECUTION_STATUS_RUNNING {
+			return execution, nil
+		}
+	}
+	return nil, nil
 }
 
 func firstWorkflowAdapter(workflowEntity *reinv1.Workflow) (string, bool) {
@@ -732,6 +779,11 @@ func firstWorkflowAdapter(workflowEntity *reinv1.Workflow) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func firstWorkflowAdapterID(workflowEntity *reinv1.Workflow) string {
+	adapterID, _ := firstWorkflowAdapter(workflowEntity)
+	return adapterID
 }
 
 func workflowStepIndex(workflowEntity *reinv1.Workflow) map[string]*reinv1.WorkflowStep {

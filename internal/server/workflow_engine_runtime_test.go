@@ -145,8 +145,8 @@ func TestManagedServicesWorkflowEngineFlow(t *testing.T) {
 	if got := getIssueResp.GetIssue().GetStatus(); got != reinv1.IssueStatus_ISSUE_STATUS_RESOLVED {
 		t.Fatalf("GetIssue() status = %s, want resolved", got)
 	}
-	if getIssueResp.GetIssue().GetLabels()["integration_status"] != "merged" {
-		t.Fatalf("GetIssue() integration_status = %q, want merged", getIssueResp.GetIssue().GetLabels()["integration_status"])
+	if getIssueResp.GetIssue().GetDaemonState().GetIntegrationStatus() != "merged" {
+		t.Fatalf("GetIssue() daemon_state.integration_status = %q, want merged", getIssueResp.GetIssue().GetDaemonState().GetIntegrationStatus())
 	}
 
 	engine := workflowpkg.New(store)
@@ -227,8 +227,11 @@ func (a *runtimeAdapter) Run(_ context.Context, state *workflowpkg.RuntimeState,
 			state.Execution.Metadata["issue_url"] = fmt.Sprintf("https://tracker.fake/issues/%s", state.Issue.GetId())
 			state.Execution.Metadata["branch"] = "issues/rn-10-workflow-engine-runtime-test"
 			state.Execution.Metadata["worktree"] = "/worktrees/rn-10-workflow-engine-runtime-test"
-			state.Issue.Labels["branch"] = state.Execution.Metadata["branch"]
-			state.Issue.Labels["worktree"] = state.Execution.Metadata["worktree"]
+			if state.Issue.DaemonState == nil {
+				state.Issue.DaemonState = &reinv1.IssueDaemonState{}
+			}
+			state.Issue.DaemonState.Branch = state.Execution.Metadata["branch"]
+			state.Issue.DaemonState.Worktree = state.Execution.Metadata["worktree"]
 			effect.Outputs = map[string]string{"branch": state.Execution.Metadata["branch"]}
 		case "open-pr":
 			if state.Execution.Metadata["branch"] == "" {
@@ -236,14 +239,20 @@ func (a *runtimeAdapter) Run(_ context.Context, state *workflowpkg.RuntimeState,
 			}
 			state.Execution.Metadata["pr_url"] = "https://tracker.fake/repos/rein/pull/110"
 			state.Execution.Metadata["pr_state"] = "OPEN"
-			state.Issue.Labels["pr_url"] = state.Execution.Metadata["pr_url"]
+			if state.Issue.DaemonState == nil {
+				state.Issue.DaemonState = &reinv1.IssueDaemonState{}
+			}
+			state.Issue.DaemonState.PrUrl = state.Execution.Metadata["pr_url"]
 		case "approve-pr":
 			if state.Execution.Metadata["pr_url"] == "" {
 				return errors.New("pr missing before review")
 			}
 			state.Execution.Metadata["review_state"] = "APPROVED"
 			state.Execution.Metadata["reviewed_by"] = runtimeReviewAdapterID
-			state.Issue.Labels["review_state"] = "APPROVED"
+			if state.Issue.DaemonState == nil {
+				state.Issue.DaemonState = &reinv1.IssueDaemonState{}
+			}
+			state.Issue.DaemonState.ReviewState = "APPROVED"
 		case "merge":
 			if state.Execution.Metadata["review_state"] != "APPROVED" {
 				return errors.New("review missing before merge")
@@ -251,7 +260,10 @@ func (a *runtimeAdapter) Run(_ context.Context, state *workflowpkg.RuntimeState,
 			state.Execution.Metadata["merge_commit"] = "merge-rn-10-001"
 			state.Execution.Metadata["integration_branch"] = state.Execution.Metadata["base_branch"]
 			state.Execution.Metadata["result"] = "merged"
-			state.Issue.Labels["merge_commit"] = state.Execution.Metadata["merge_commit"]
+			if state.Issue.DaemonState == nil {
+				state.Issue.DaemonState = &reinv1.IssueDaemonState{}
+			}
+			state.Issue.DaemonState.MergeCommit = state.Execution.Metadata["merge_commit"]
 		}
 	case workflowpkg.DirectionBackward:
 		switch effect.Operation {

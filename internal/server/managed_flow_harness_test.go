@@ -174,7 +174,7 @@ func TestManagedFlowHarnessIssueToMergeFlow(t *testing.T) {
 		t.Fatalf("GetIssue() updated_time = %s, want after %s", issue.GetUpdatedTime().AsTime(), issueResp.GetIssue().GetUpdatedTime().AsTime())
 	}
 
-	wantLabels := map[string]string{
+	wantDaemonState := map[string]string{
 		"branch":             "issues/rn-9-e2e-flow-harness-against-fakes",
 		"worktree":           "/worktrees/rn-9-e2e-flow-harness-against-fakes",
 		"pr_url":             "https://tracker.fake/repos/rein/pull/101",
@@ -182,9 +182,17 @@ func TestManagedFlowHarnessIssueToMergeFlow(t *testing.T) {
 		"merge_commit":       "merge-rn-9-001",
 		"integration_status": "merged",
 	}
-	for key, want := range wantLabels {
-		if got := issue.GetLabels()[key]; got != want {
-			t.Fatalf("GetIssue() labels[%q] = %q, want %q", key, got, want)
+	gotDaemonState := map[string]string{
+		"branch":             issue.GetDaemonState().GetBranch(),
+		"worktree":           issue.GetDaemonState().GetWorktree(),
+		"pr_url":             issue.GetDaemonState().GetPrUrl(),
+		"review_state":       issue.GetDaemonState().GetReviewState(),
+		"merge_commit":       issue.GetDaemonState().GetMergeCommit(),
+		"integration_status": issue.GetDaemonState().GetIntegrationStatus(),
+	}
+	for key, want := range wantDaemonState {
+		if got := gotDaemonState[key]; got != want {
+			t.Fatalf("GetIssue() daemon_state[%q] = %q, want %q", key, got, want)
 		}
 	}
 
@@ -659,10 +667,16 @@ func (s *managedFlowExecutionService) StartExecution(ctx context.Context, req *r
 	now := timestamppb.Now()
 	issue.Status = reinv1.IssueStatus_ISSUE_STATUS_IN_PROGRESS
 	issue.UpdatedTime = now
-	if issue.Labels == nil {
-		issue.Labels = map[string]string{}
+	if issue.DaemonState == nil {
+		issue.DaemonState = &reinv1.IssueDaemonState{}
 	}
-	issue.Labels["integration_status"] = "running"
+	issue.DaemonState.ExecutionId = "exec-rn-9-001"
+	issue.DaemonState.Branch = ""
+	issue.DaemonState.Worktree = ""
+	issue.DaemonState.PrUrl = ""
+	issue.DaemonState.ReviewState = ""
+	issue.DaemonState.MergeCommit = ""
+	issue.DaemonState.IntegrationStatus = "running"
 
 	issueRecord, err = updateStoredProto(ctx, s.store, sqlite.IssueKind, issue.GetId(), issueRecord.LockVersion, issue)
 	if err != nil {
@@ -759,7 +773,7 @@ func (s *managedFlowExecutionService) StartExecution(ctx context.Context, req *r
 
 	issue.Status = reinv1.IssueStatus_ISSUE_STATUS_RESOLVED
 	issue.UpdatedTime = timestamppb.Now()
-	issue.Labels["integration_status"] = "merged"
+	issue.DaemonState.IntegrationStatus = "merged"
 	if _, err := updateStoredProto(ctx, s.store, sqlite.IssueKind, issue.GetId(), issueRecord.LockVersion, issue); err != nil {
 		return nil, status.Errorf(codes.Internal, "resolve issue %q: %v", issue.GetId(), err)
 	}
@@ -968,8 +982,11 @@ func (a *managedFlowTrackerAdapter) Run(ctx context.Context, state *managedFlowS
 		state.execution.Metadata["issue_url"] = fmt.Sprintf("https://tracker.fake/issues/%s", state.issue.GetId())
 		state.execution.Metadata["branch"] = branch
 		state.execution.Metadata["worktree"] = worktree
-		state.issue.Labels["branch"] = branch
-		state.issue.Labels["worktree"] = worktree
+		if state.issue.DaemonState == nil {
+			state.issue.DaemonState = &reinv1.IssueDaemonState{}
+		}
+		state.issue.DaemonState.Branch = branch
+		state.issue.DaemonState.Worktree = worktree
 		return state.recordCost(ctx, step, 1200, cost.Usage{InputTokens: 120, OutputTokens: 40}, map[string]string{"operation": "prepare"})
 	case "merge":
 		if state.execution.Metadata["review_state"] != "APPROVED" {
@@ -985,7 +1002,10 @@ func (a *managedFlowTrackerAdapter) Run(ctx context.Context, state *managedFlowS
 		mergeCommit := "merge-rn-9-001"
 		state.execution.Metadata["merge_commit"] = mergeCommit
 		state.execution.Metadata["integration_branch"] = baseBranch
-		state.issue.Labels["merge_commit"] = mergeCommit
+		if state.issue.DaemonState == nil {
+			state.issue.DaemonState = &reinv1.IssueDaemonState{}
+		}
+		state.issue.DaemonState.MergeCommit = mergeCommit
 		return state.recordCost(ctx, step, 1100, cost.Usage{InputTokens: 60, OutputTokens: 25}, map[string]string{"operation": "merge"})
 	default:
 		return fmt.Errorf("unsupported tracker operation %q", step.GetInputs()["operation"])
@@ -1014,7 +1034,10 @@ func (a *managedFlowCodingAdapter) Run(ctx context.Context, state *managedFlowSt
 
 	state.execution.Metadata["pr_url"] = "https://tracker.fake/repos/rein/pull/101"
 	state.execution.Metadata["pr_state"] = "OPEN"
-	state.issue.Labels["pr_url"] = state.execution.Metadata["pr_url"]
+	if state.issue.DaemonState == nil {
+		state.issue.DaemonState = &reinv1.IssueDaemonState{}
+	}
+	state.issue.DaemonState.PrUrl = state.execution.Metadata["pr_url"]
 	return state.recordCost(ctx, step, 2400, cost.Usage{InputTokens: 400, OutputTokens: 180}, nil)
 }
 
@@ -1033,7 +1056,10 @@ func (a *managedFlowReviewAdapter) Run(ctx context.Context, state *managedFlowSt
 
 	state.execution.Metadata["review_state"] = "APPROVED"
 	state.execution.Metadata["reviewed_by"] = a.descriptor.GetId()
-	state.issue.Labels["review_state"] = "APPROVED"
+	if state.issue.DaemonState == nil {
+		state.issue.DaemonState = &reinv1.IssueDaemonState{}
+	}
+	state.issue.DaemonState.ReviewState = "APPROVED"
 	return state.recordCost(ctx, step, 900, cost.Usage{InputTokens: 80, OutputTokens: 30}, nil)
 }
 
