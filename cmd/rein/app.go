@@ -25,7 +25,6 @@ import (
 	"google.golang.org/protobuf/types/dynamicpb"
 
 	"github.com/earchibald/rein/internal/adapter"
-	"github.com/earchibald/rein/internal/instance"
 	"github.com/earchibald/rein/internal/server"
 	"github.com/earchibald/rein/internal/service"
 	"github.com/earchibald/rein/internal/storage/sqlite"
@@ -91,7 +90,12 @@ func (a *app) run(args []string) error {
 		return a.runDaemon(root, remaining[1:])
 	case "doctor":
 		return a.runDoctor(root, remaining[1:])
+	case "describe-as":
+		return a.runDescribe(remaining)
 	default:
+		if strings.HasPrefix(remaining[0], "describe-as=") {
+			return a.runDescribe(remaining)
+		}
 		return a.runRPC(root, remaining)
 	}
 }
@@ -110,6 +114,24 @@ func (a *app) runDaemon(root rootConfig, args []string) error {
 		return err
 	}
 	return a.serveDaemon(serveConfig)
+}
+
+func (a *app) runDescribe(args []string) error {
+	format, showHelp, err := parseDescribeArgs(args)
+	if err != nil {
+		return err
+	}
+	if showHelp {
+		a.printDescribeHelp()
+		return flag.ErrHelp
+	}
+
+	output, err := renderDescribeAs(format)
+	if err != nil {
+		return err
+	}
+	_, err = io.WriteString(a.stdout, output)
+	return err
 }
 
 func (a *app) serveDaemon(config daemonServeConfig) error {
@@ -415,13 +437,12 @@ func (a *app) printRootHelp() {
 	fmt.Fprintln(a.stderr, "  rein [global flags] <service> <verb> [flags]")
 	fmt.Fprintln(a.stderr, "  rein [global flags] daemon serve [flags]")
 	fmt.Fprintln(a.stderr, "  rein [global flags] doctor")
+	fmt.Fprintln(a.stderr, "  rein [global flags] describe-as=<format>")
 	fmt.Fprintln(a.stderr)
 	fmt.Fprintln(a.stderr, "Global flags:")
-	fmt.Fprintf(a.stderr, "  --instance string\n    Select the daemon instance (default %q or %s)\n", instance.DefaultName, instance.EnvVar)
-	fmt.Fprintln(a.stderr, "  --grpc-network string")
-	fmt.Fprintln(a.stderr, "    Override the daemon network for client connections.")
-	fmt.Fprintln(a.stderr, "  --grpc-address string")
-	fmt.Fprintln(a.stderr, "    Override the daemon address for client connections.")
+	for _, flag := range globalFlagDescriptions() {
+		fmt.Fprintf(a.stderr, "  --%s %s\n    %s\n", flag.Name, flag.Type, flag.Description)
+	}
 	fmt.Fprintln(a.stderr)
 	fmt.Fprintln(a.stderr, "Commands:")
 
@@ -445,6 +466,7 @@ func (a *app) printRootHelp() {
 	fmt.Fprintln(a.stderr)
 	fmt.Fprintln(a.stderr, "  daemon serve\tStart the daemon and expose the canonical gRPC surface.")
 	fmt.Fprintln(a.stderr, "  doctor\tEmit JSON diagnostics for daemon health and local instance readiness.")
+	fmt.Fprintln(a.stderr, "  describe-as=<format>\tEmit a stable machine-consumable surface description.")
 }
 
 func (a *app) printDaemonHelp() {
@@ -452,10 +474,20 @@ func (a *app) printDaemonHelp() {
 	fmt.Fprintln(a.stderr, "  rein [global flags] daemon serve [flags]")
 	fmt.Fprintln(a.stderr)
 	fmt.Fprintln(a.stderr, "Flags:")
-	fmt.Fprintf(a.stderr, "  --grpc-network string\n    Listener network: tcp or unix (default %q)\n", server.DefaultListenerNetwork())
-	fmt.Fprintln(a.stderr, "  --grpc-address string")
-	fmt.Fprintln(a.stderr, "    Listener address or unix socket path.")
-	fmt.Fprintf(a.stderr, "  --grpc-require-peer-credentials bool\n    Require SO_PEERCRED same-UID authentication for unix sockets (default %t)\n", server.DefaultListenerConfig().RequirePeerCredentials)
+	for _, flag := range daemonServeFlagDescriptions() {
+		fmt.Fprintf(a.stderr, "  --%s %s\n    %s\n", flag.Name, flag.Type, flag.Description)
+	}
+}
+
+func (a *app) printDescribeHelp() {
+	fmt.Fprintln(a.stderr, "Usage:")
+	fmt.Fprintln(a.stderr, "  rein [global flags] describe-as=<format>")
+	fmt.Fprintln(a.stderr, "  rein [global flags] describe-as <format>")
+	fmt.Fprintln(a.stderr)
+	fmt.Fprintln(a.stderr, "Formats:")
+	for _, format := range supportedDescribeFormats() {
+		fmt.Fprintf(a.stderr, "  %s\n    %s\n", format.Name, format.Description)
+	}
 }
 
 func (a *app) printDoctorHelp() {
@@ -492,7 +524,7 @@ func fieldUsage(field protoreflect.FieldDescriptor) string {
 	if comment == "" {
 		comment = fmt.Sprintf("Set request field %s.", field.Name())
 	}
-	if field.IsList() || field.IsMap() || field.Kind() == protoreflect.MessageKind {
+	if (field.IsList() || field.IsMap() || field.Kind() == protoreflect.MessageKind) && !strings.Contains(strings.ToLower(comment), "json") {
 		return comment + " Pass JSON."
 	}
 	return comment
@@ -533,6 +565,38 @@ func cleanComment(value string) string {
 
 func isHelpToken(value string) bool {
 	return value == "-h" || value == "--help" || value == "help"
+}
+
+func parseDescribeArgs(args []string) (format string, showHelp bool, err error) {
+	if len(args) == 0 {
+		return "", false, fmt.Errorf("describe-as format is required")
+	}
+	if strings.HasPrefix(args[0], "describe-as=") {
+		format = strings.TrimPrefix(args[0], "describe-as=")
+		if format == "" {
+			return "", false, fmt.Errorf("describe-as format is required")
+		}
+		if len(args) == 1 {
+			return format, false, nil
+		}
+		if len(args) == 2 && isHelpToken(args[1]) {
+			return "", true, nil
+		}
+		return "", false, fmt.Errorf("unexpected arguments: %v", args[1:])
+	}
+	if args[0] != "describe-as" {
+		return "", false, fmt.Errorf("unknown describe command %q", args[0])
+	}
+	if len(args) == 1 {
+		return "", true, nil
+	}
+	if isHelpToken(args[1]) {
+		return "", true, nil
+	}
+	if len(args) != 2 {
+		return "", false, fmt.Errorf("unexpected arguments: %v", args[2:])
+	}
+	return args[1], false, nil
 }
 
 func sliceMin(a, b int) int {

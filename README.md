@@ -16,6 +16,8 @@ Modular orchestrator daemon — successor to op-obsidian. Go daemon + plural HMI
 - `rein` is the canonical gRPC client CLI. By default it connects to the selected instance over that instance's unix socket.
 - Use `rein daemon serve` to start the daemon for the selected instance.
 - Use `rein doctor` to inspect the selected instance and emit machine-parseable JSON readiness diagnostics.
+- Use `rein describe-as=cli` for a manual-style, machine-consumable description of the CLI/gRPC surface and reachable protobuf schemas.
+- Use `rein describe-as=mcp` for a stable YAML description of commands, flags, gateway stub routes, and schemas suitable for wrapper/skill tooling.
 - Service commands mirror the protobuf API: `rein project|issue|execution|workflow|adapter <verb>`.
 - Request flags map 1:1 to top-level gRPC request fields. Scalar fields take plain values; message, repeated, and map fields take JSON blobs.
 - Responses are emitted as JSON using protobuf field names.
