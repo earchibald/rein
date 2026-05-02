@@ -27,11 +27,11 @@ func TestManagedMessagingNullAdapterConformance(t *testing.T) {
 		Validate: func(tb testing.TB, _ *reinv1.Adapter, implementation any) {
 			tb.Helper()
 
-			adapter, ok := implementation.(MessagingAdapter)
+			messagingAdapter, ok := implementation.(MessagingAdapter)
 			if !ok {
 				tb.Fatalf("implementation type = %T, want MessagingAdapter", implementation)
 			}
-			receipt, err := adapter.Post(context.Background(), MessagingPost{Operation: "post"})
+			receipt, err := messagingAdapter.Post(context.Background(), MessagingPost{Operation: "post"})
 			if err != nil {
 				tb.Fatalf("Post() error = %v", err)
 			}

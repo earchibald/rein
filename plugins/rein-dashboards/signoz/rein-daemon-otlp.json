@@ -1,0 +1,406 @@
+{
+  "title": "Rein Daemon OTLP",
+  "description": "Reference dashboard for rein daemon OTLP traces, metrics, and logs.",
+  "version": "v5",
+  "tags": [
+    "rein",
+    "otlp"
+  ],
+  "variables": {},
+  "layout": [
+    { "i": "row-overview", "x": 0, "y": 0, "w": 12, "h": 1, "moved": false, "static": false },
+    { "i": "daemon-starts", "x": 0, "y": 1, "w": 3, "h": 2, "moved": false, "static": false },
+    { "i": "rpc-requests", "x": 3, "y": 1, "w": 3, "h": 2, "moved": false, "static": false },
+    { "i": "rpc-errors", "x": 6, "y": 1, "w": 3, "h": 2, "moved": false, "static": false },
+    { "i": "daemon-running", "x": 9, "y": 1, "w": 3, "h": 2, "moved": false, "static": false },
+    { "i": "rpc-duration", "x": 0, "y": 3, "w": 6, "h": 5, "moved": false, "static": false },
+    { "i": "rpc-latency-traces", "x": 6, "y": 3, "w": 6, "h": 5, "moved": false, "static": false },
+    { "i": "row-activity", "x": 0, "y": 8, "w": 12, "h": 1, "moved": false, "static": false },
+    { "i": "rpc-table", "x": 0, "y": 9, "w": 7, "h": 6, "moved": false, "static": false },
+    { "i": "recent-logs", "x": 7, "y": 9, "w": 5, "h": 6, "moved": false, "static": false }
+  ],
+  "widgets": [
+    {
+      "id": "row-overview",
+      "title": "Overview",
+      "panelTypes": "row",
+      "query": {}
+    },
+    {
+      "id": "daemon-starts",
+      "title": "Daemon Starts",
+      "panelTypes": "value",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "metricName": "rein.daemon.starts",
+                  "reduceTo": "sum",
+                  "spaceAggregation": "sum",
+                  "temporality": null,
+                  "timeAggregation": "sum"
+                }
+              ],
+              "dataSource": "metrics",
+              "disabled": false,
+              "expression": "A",
+              "groupBy": [],
+              "having": { "expression": "" },
+              "legend": "Starts",
+              "queryName": "A",
+              "stepInterval": 60
+            }
+          ],
+          "queryFormulas": []
+        },
+        "queryType": "builder"
+      }
+    },
+    {
+      "id": "rpc-requests",
+      "title": "RPC Requests",
+      "panelTypes": "value",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "metricName": "rein.rpc.requests",
+                  "reduceTo": "sum",
+                  "spaceAggregation": "sum",
+                  "temporality": null,
+                  "timeAggregation": "sum"
+                }
+              ],
+              "dataSource": "metrics",
+              "disabled": false,
+              "expression": "A",
+              "groupBy": [],
+              "having": { "expression": "" },
+              "legend": "Requests",
+              "queryName": "A",
+              "stepInterval": 60
+            }
+          ],
+          "queryFormulas": []
+        },
+        "queryType": "builder"
+      }
+    },
+    {
+      "id": "rpc-errors",
+      "title": "RPC Errors",
+      "panelTypes": "value",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "metricName": "rein.rpc.errors",
+                  "reduceTo": "sum",
+                  "spaceAggregation": "sum",
+                  "temporality": null,
+                  "timeAggregation": "sum"
+                }
+              ],
+              "dataSource": "metrics",
+              "disabled": false,
+              "expression": "A",
+              "groupBy": [],
+              "having": { "expression": "" },
+              "legend": "Errors",
+              "queryName": "A",
+              "stepInterval": 60
+            }
+          ],
+          "queryFormulas": []
+        },
+        "queryType": "builder"
+      }
+    },
+    {
+      "id": "daemon-running",
+      "title": "Daemon Running",
+      "panelTypes": "value",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "metricName": "rein.daemon.running",
+                  "reduceTo": "last",
+                  "spaceAggregation": "last",
+                  "temporality": null,
+                  "timeAggregation": "avg"
+                }
+              ],
+              "dataSource": "metrics",
+              "disabled": false,
+              "expression": "A",
+              "groupBy": [],
+              "having": { "expression": "" },
+              "legend": "Running",
+              "queryName": "A",
+              "stepInterval": 60
+            }
+          ],
+          "queryFormulas": []
+        },
+        "queryType": "builder"
+      }
+    },
+    {
+      "id": "rpc-duration",
+      "title": "RPC Duration (ms)",
+      "panelTypes": "graph",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregations": [
+                {
+                  "metricName": "rein.rpc.duration",
+                  "reduceTo": "avg",
+                  "spaceAggregation": "avg",
+                  "temporality": null,
+                  "timeAggregation": "avg"
+                }
+              ],
+              "dataSource": "metrics",
+              "disabled": false,
+              "expression": "A",
+              "groupBy": [],
+              "having": { "expression": "" },
+              "legend": "Avg duration",
+              "queryName": "A",
+              "stepInterval": 60
+            }
+          ],
+          "queryFormulas": []
+        },
+        "queryType": "builder"
+      }
+    },
+    {
+      "id": "rpc-latency-traces",
+      "title": "Trace Latency",
+      "panelTypes": "graph",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregateAttribute": {
+                "dataType": "float64",
+                "id": "durationNano--float64--tag--true",
+                "isColumn": true,
+                "isJSON": false,
+                "key": "durationNano",
+                "type": "tag"
+              },
+              "aggregateOperator": "avg",
+              "dataSource": "traces",
+              "disabled": false,
+              "expression": "A",
+              "filters": {
+                "items": [
+                  {
+                    "id": "service-name",
+                    "key": { "dataType": "", "isColumn": false, "isJSON": false, "key": "service.name", "type": "" },
+                    "op": "=",
+                    "value": "rein-daemon"
+                  }
+                ],
+                "op": "AND"
+              },
+              "functions": [],
+              "groupBy": [],
+              "having": [],
+              "legend": "Avg latency",
+              "limit": null,
+              "orderBy": [],
+              "queryName": "A",
+              "reduceTo": "avg",
+              "spaceAggregation": "sum",
+              "stepInterval": 60,
+              "timeAggregation": "avg"
+            }
+          ],
+          "queryFormulas": []
+        },
+        "clickhouse_sql": [
+          { "disabled": false, "legend": "", "name": "A", "query": "" }
+        ],
+        "promql": [
+          { "disabled": false, "legend": "", "name": "A", "query": "" }
+        ],
+        "queryType": "builder"
+      }
+    },
+    {
+      "id": "row-activity",
+      "title": "Requests + Logs",
+      "panelTypes": "row",
+      "query": {}
+    },
+    {
+      "id": "rpc-table",
+      "title": "Top RPCs",
+      "panelTypes": "table",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "aggregateAttribute": {
+                "dataType": "",
+                "id": "------false",
+                "isColumn": false,
+                "isJSON": false,
+                "key": "",
+                "type": ""
+              },
+              "aggregateOperator": "count",
+              "dataSource": "traces",
+              "disabled": false,
+              "expression": "A",
+              "filters": {
+                "items": [
+                  {
+                    "id": "service-name-table",
+                    "key": { "dataType": "", "isColumn": false, "isJSON": false, "key": "service.name", "type": "" },
+                    "op": "=",
+                    "value": "rein-daemon"
+                  }
+                ],
+                "op": "AND"
+              },
+              "functions": [],
+              "groupBy": [
+                {
+                  "dataType": "string",
+                  "id": "rpc.service--string--tag--false",
+                  "isColumn": false,
+                  "isJSON": false,
+                  "key": "rpc.service",
+                  "type": "tag"
+                },
+                {
+                  "dataType": "string",
+                  "id": "rpc.method--string--tag--false",
+                  "isColumn": false,
+                  "isJSON": false,
+                  "key": "rpc.method",
+                  "type": "tag"
+                }
+              ],
+              "having": [],
+              "legend": "Calls",
+              "limit": 10,
+              "orderBy": [
+                { "columnName": "#SIGNOZ_VALUE", "order": "desc" }
+              ],
+              "queryName": "A",
+              "reduceTo": "avg",
+              "spaceAggregation": "sum",
+              "stepInterval": 60,
+              "timeAggregation": "rate"
+            },
+            {
+              "aggregateAttribute": {
+                "dataType": "float64",
+                "id": "durationNano--float64--tag--true",
+                "isColumn": true,
+                "isJSON": false,
+                "key": "durationNano",
+                "type": "tag"
+              },
+              "aggregateOperator": "avg",
+              "dataSource": "traces",
+              "disabled": false,
+              "expression": "B",
+              "filters": {
+                "items": [
+                  {
+                    "id": "service-name-table-avg",
+                    "key": { "dataType": "", "isColumn": false, "isJSON": false, "key": "service.name", "type": "" },
+                    "op": "=",
+                    "value": "rein-daemon"
+                  }
+                ],
+                "op": "AND"
+              },
+              "functions": [],
+              "groupBy": [
+                {
+                  "dataType": "string",
+                  "id": "rpc.service-avg--string--tag--false",
+                  "isColumn": false,
+                  "isJSON": false,
+                  "key": "rpc.service",
+                  "type": "tag"
+                },
+                {
+                  "dataType": "string",
+                  "id": "rpc.method-avg--string--tag--false",
+                  "isColumn": false,
+                  "isJSON": false,
+                  "key": "rpc.method",
+                  "type": "tag"
+                }
+              ],
+              "having": [],
+              "legend": "Avg latency",
+              "limit": 10,
+              "orderBy": [
+                { "columnName": "#SIGNOZ_VALUE", "order": "desc" }
+              ],
+              "queryName": "B",
+              "reduceTo": "avg",
+              "spaceAggregation": "sum",
+              "stepInterval": 60,
+              "timeAggregation": "avg"
+            }
+          ],
+          "queryFormulas": []
+        },
+        "queryType": "builder"
+      }
+    },
+    {
+      "id": "recent-logs",
+      "title": "Recent Logs",
+      "panelTypes": "list",
+      "query": {
+        "builder": {
+          "queryData": [
+            {
+              "dataSource": "logs",
+              "disabled": false,
+              "expression": "A",
+              "filter": {
+                "expression": "service.name = 'rein-daemon'"
+              },
+              "having": { "expression": "" },
+              "limit": 10,
+              "orderBy": [],
+              "pageSize": 10,
+              "queryName": "A",
+              "selectColumns": [
+                { "dataType": "string", "isColumn": true, "key": "timestamp", "type": "tag" },
+                { "dataType": "string", "isColumn": false, "key": "severity_text", "type": "tag" },
+                { "dataType": "string", "isColumn": true, "key": "body", "type": "tag" }
+              ],
+              "stepInterval": 60
+            }
+          ],
+          "queryFormulas": []
+        },
+        "queryType": "builder"
+      }
+    }
+  ]
+}

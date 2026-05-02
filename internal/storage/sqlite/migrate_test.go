@@ -459,7 +459,7 @@ func assertTableExists(t *testing.T, db *sql.DB, table string, want bool) {
 	t.Helper()
 
 	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&count); err != nil {
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&count); err != nil {
 		t.Fatalf("query sqlite_master for %s: %v", table, err)
 	}
 
@@ -471,7 +471,7 @@ func assertTableExists(t *testing.T, db *sql.DB, table string, want bool) {
 func assertTableHasColumns(t *testing.T, db *sql.DB, table string, want bool, columns ...string) {
 	t.Helper()
 
-	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
+	rows, err := db.QueryContext(context.Background(), `PRAGMA table_info(`+table+`)`)
 	if err != nil {
 		t.Fatalf("PRAGMA table_info(%s) error = %v", table, err)
 	}

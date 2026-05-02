@@ -113,6 +113,7 @@ func rootUsageLines() []string {
 		"rein [global flags] <service> <verb> [flags]",
 		"rein [global flags] backup [flags] <destination>",
 		"rein [global flags] daemon serve [flags]",
+		"rein dashboards apply [flags]",
 		"rein [global flags] describe-as=<format>",
 		"rein [global flags] restore [flags] <source>",
 	}
@@ -140,6 +141,9 @@ func daemonServeFlagDescriptions() []staticFlagDescription {
 		{Name: "grpc-network", Type: "string", Description: fmt.Sprintf("Listener network: tcp or unix (default %q).", defaults.Network)},
 		{Name: "grpc-address", Type: "string", Description: "Listener address or unix socket path."},
 		{Name: "grpc-require-peer-credentials", Type: "bool", Description: fmt.Sprintf("Require SO_PEERCRED same-UID authentication for unix sockets (default %t).", defaults.RequirePeerCredentials)},
+		{Name: "otlp-endpoint", Type: "string", Description: "Optional OTLP/gRPC collector endpoint (host:port)."},
+		{Name: "otlp-headers", Type: "string", Description: "Optional OTLP headers as comma-separated key=value pairs."},
+		{Name: "otlp-insecure", Type: "bool", Description: "Disable TLS for OTLP collector connections."},
 	}
 }
 

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"flag"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -116,7 +118,7 @@ func TestParseDaemonServeConfigHonorsExplicitAddress(t *testing.T) {
 		t.Fatalf("parseRootConfig() error = %v", err)
 	}
 
-	config, err := parseDaemonServeConfig(root, []string{"--grpc-network", "unix", "--grpc-address", "/override.sock"}, io.Discard)
+	config, err := parseDaemonServeConfig(root, []string{"--grpc-network", "unix", "--grpc-address", "/override.sock"}, io.Discard, nil)
 	if err != nil {
 		t.Fatalf("parseDaemonServeConfig() error = %v", err)
 	}
@@ -207,6 +209,8 @@ func TestRootHelpListsStaticCommands(t *testing.T) {
 	output := stderr.String()
 	for _, want := range []string{
 		"backup\tCheckpoint SQLite WAL",
+		"rein dashboards apply [flags]",
+		"dashboards apply\tApply reference OTLP dashboards to a SigNoz workspace.",
 		"doctor\tEmit JSON diagnostics",
 		"rein [global flags] describe-as=<format>",
 		"describe-as=<format>\tEmit a stable machine-consumable surface description.",
@@ -242,6 +246,132 @@ func TestAppTUIHelp(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Fatalf("tui help missing %q\n%s", want, output)
 		}
+	}
+}
+
+func TestAppDashboardsHelp(t *testing.T) {
+	t.Parallel()
+
+	var stdout, stderr bytes.Buffer
+	app := newApp(&stdout, &stderr, func(string) (string, bool) { return "", false }, func() (string, error) {
+		return "/Users/tester", nil
+	}, func() (string, error) {
+		return "/repo", nil
+	})
+
+	err := app.run([]string{"dashboards", "--help"})
+	if err != flag.ErrHelp {
+		t.Fatalf("run() error = %v, want %v", err, flag.ErrHelp)
+	}
+	output := stderr.String()
+	for _, want := range []string{
+		"rein dashboards apply [flags]",
+		"Apply the reference rein-dashboards plugin to a SigNoz API endpoint.",
+		"--signoz-url string",
+		"--signoz-api-key string",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("dashboards help missing %q\n%s", want, output)
+		}
+	}
+}
+
+func TestParseDaemonServeConfigUsesTelemetryEnvAndFlagOverride(t *testing.T) {
+	t.Parallel()
+
+	root, _, err := parseRootConfig([]string{"daemon", "serve"}, io.Discard, func(key string) (string, bool) {
+		switch key {
+		case "XDG_STATE_HOME":
+			return "/state", true
+		case "OTEL_EXPORTER_OTLP_ENDPOINT":
+			return "https://collector.example:4317", true
+		case "OTEL_EXPORTER_OTLP_HEADERS":
+			return "x-tenant=rein", true
+		case "OTEL_EXPORTER_OTLP_INSECURE":
+			return "false", true
+		case "OTEL_SERVICE_NAME":
+			return "rein-custom", true
+		case "OTEL_RESOURCE_ATTRIBUTES":
+			return "deployment.environment=dev", true
+		default:
+			return "", false
+		}
+	}, nil)
+	if err != nil {
+		t.Fatalf("parseRootConfig() error = %v", err)
+	}
+
+	config, err := parseDaemonServeConfig(root, []string{"--otlp-endpoint", "collector.internal:4317", "--otlp-insecure"}, io.Discard, func(key string) (string, bool) {
+		switch key {
+		case "OTEL_EXPORTER_OTLP_ENDPOINT":
+			return "https://collector.example:4317", true
+		case "OTEL_EXPORTER_OTLP_HEADERS":
+			return "x-tenant=rein", true
+		case "OTEL_EXPORTER_OTLP_INSECURE":
+			return "false", true
+		case "OTEL_SERVICE_NAME":
+			return "rein-custom", true
+		case "OTEL_RESOURCE_ATTRIBUTES":
+			return "deployment.environment=dev", true
+		default:
+			return "", false
+		}
+	})
+	if err != nil {
+		t.Fatalf("parseDaemonServeConfig() error = %v", err)
+	}
+
+	if config.telemetry.Endpoint != "collector.internal:4317" {
+		t.Fatalf("telemetry endpoint = %q, want collector.internal:4317", config.telemetry.Endpoint)
+	}
+	if !config.telemetry.Insecure {
+		t.Fatal("telemetry insecure = false, want true")
+	}
+	if got := config.telemetry.Headers["x-tenant"]; got != "rein" {
+		t.Fatalf("telemetry headers = %v, want x-tenant=rein", config.telemetry.Headers)
+	}
+	if config.telemetry.ServiceName != "rein-custom" {
+		t.Fatalf("telemetry service name = %q, want rein-custom", config.telemetry.ServiceName)
+	}
+	if got := config.telemetry.ResourceAttributes["deployment.environment"]; got != "dev" {
+		t.Fatalf("resource attributes = %v, want deployment.environment=dev", config.telemetry.ResourceAttributes)
+	}
+}
+
+func TestParseDashboardsApplyConfigUsesEnv(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".claude-plugin"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(.claude-plugin) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".claude-plugin", "dashboards-marketplace.json"), []byte(`{"name":"rein-dashboards","plugins":[]}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(dashboards-marketplace.json) error = %v", err)
+	}
+
+	config, err := parseDashboardsApplyConfig(nil, io.Discard, func(key string) (string, bool) {
+		switch key {
+		case "SIGNOZ_BASE_URL":
+			return "https://signoz.example", true
+		case "SIGNOZ_API_KEY":
+			return "secret", true
+		default:
+			return "", false
+		}
+	}, func() (string, error) {
+		return filepath.Join(root, "subdir"), nil
+	})
+	if err != nil {
+		t.Fatalf("parseDashboardsApplyConfig() error = %v", err)
+	}
+	if config.BaseURL != "https://signoz.example" {
+		t.Fatalf("BaseURL = %q, want https://signoz.example", config.BaseURL)
+	}
+	if config.APIKey != "secret" {
+		t.Fatalf("APIKey = %q, want secret", config.APIKey)
+	}
+	if config.RootPath != root {
+		t.Fatalf("RootPath = %q, want %q", config.RootPath, root)
 	}
 }
 

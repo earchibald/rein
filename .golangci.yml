@@ -1,50 +1,65 @@
+version: "2"
 linters:
   enable:
     - bodyclose
     - dogsled
     - durationcheck
-    - errcheck
     - exhaustive
     - forbidigo
     - gocritic
     - godot
-    - gofmt
-    - goimports
     - gosec
-    - govet
-    - ineffassign
     - misspell
     - noctx
     - nolintlint
     - revive
     - rowserrcheck
     - sqlclosecheck
-    - staticcheck
     - unconvert
     - unparam
-    - unused
     - wastedassign
-
-linters-settings:
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - style
-  goimports:
-    local-prefixes: github.com/earchibald/rein
-  revive:
+  settings:
+    exhaustive:
+      default-signifies-exhaustive: true
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+    revive:
+      rules:
+        - name: exported
+          arguments:
+            - disableStutteringCheck
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
     rules:
-      - name: exported
-        arguments:
-          - disableStutteringCheck
-  exhaustive:
-    default-signifies-exhaustive: true
-
+      - linters:
+          - gosec
+          - unparam
+        path: _test\.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
 issues:
   max-issues-per-linter: 50
   max-same-issues: 10
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - gosec
-        - unparam
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/earchibald/rein
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

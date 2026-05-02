@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log/slog"
 	"net"
 	"os"
 	"os/signal"
@@ -25,10 +24,12 @@ import (
 	"google.golang.org/protobuf/types/dynamicpb"
 
 	"github.com/earchibald/rein/internal/adapter"
+	"github.com/earchibald/rein/internal/dashboards"
 	"github.com/earchibald/rein/internal/instance"
 	"github.com/earchibald/rein/internal/server"
 	"github.com/earchibald/rein/internal/service"
 	"github.com/earchibald/rein/internal/storage/sqlite"
+	"github.com/earchibald/rein/internal/telemetry"
 	"github.com/earchibald/rein/internal/tui"
 	protofiles "github.com/earchibald/rein/proto"
 )
@@ -92,6 +93,8 @@ func (a *app) run(args []string) error {
 		return a.runDaemon(root, remaining[1:])
 	case "backup":
 		return a.runBackup(root, remaining[1:])
+	case "dashboards":
+		return a.runDashboards(remaining[1:])
 	case "doctor":
 		return a.runDoctor(root, remaining[1:])
 	case "describe-as":
@@ -117,7 +120,7 @@ func (a *app) runDaemon(root rootConfig, args []string) error {
 		return fmt.Errorf("unknown daemon command %q", args[0])
 	}
 
-	serveConfig, err := parseDaemonServeConfig(root, args[1:], a.stderr)
+	serveConfig, err := parseDaemonServeConfig(root, args[1:], a.stderr, a.lookupEnv)
 	if err != nil {
 		return err
 	}
@@ -143,7 +146,23 @@ func (a *app) runDescribe(args []string) error {
 }
 
 func (a *app) serveDaemon(config daemonServeConfig) error {
-	logger := slog.New(slog.NewTextHandler(a.stdout, nil))
+	telemetryConfig := config.telemetry
+	if telemetryConfig.ResourceAttributes == nil {
+		telemetryConfig.ResourceAttributes = map[string]string{}
+	}
+	telemetryConfig.ResourceAttributes["rein.instance"] = config.instance.Name
+	telemetryConfig.ResourceAttributes["service.instance.id"] = config.instance.Name
+	daemonTelemetry, err := telemetry.NewDaemonRuntime(context.Background(), telemetryConfig, a.stdout)
+	if err != nil {
+		return fmt.Errorf("configure OTLP telemetry: %w", err)
+	}
+	defer func() {
+		if shutdownErr := daemonTelemetry.Shutdown(context.Background()); shutdownErr != nil {
+			_, _ = fmt.Fprintf(a.stderr, "rein: shutdown telemetry: %v\n", shutdownErr)
+		}
+	}()
+
+	logger := daemonTelemetry.Logger
 	if err := config.instance.EnsureRootDir(); err != nil {
 		return fmt.Errorf("prepare instance state directory: %w", err)
 	}
@@ -172,7 +191,11 @@ func (a *app) serveDaemon(config daemonServeConfig) error {
 	}
 	defer listener.Close()
 
-	runtime := server.New(server.Options{Services: service.NewManagedSet(store, catalog)})
+	runtime := server.New(server.Options{
+		Services:    service.NewManagedSet(store, catalog),
+		GRPCOptions: daemonTelemetry.GRPCOptions,
+	})
+	daemonTelemetry.RecordStartup(context.Background())
 	logger.Info(
 		"rein daemon starting",
 		"instance", config.instance.Name,
@@ -192,6 +215,58 @@ func (a *app) serveDaemon(config daemonServeConfig) error {
 	defer stop()
 
 	return runtime.Serve(ctx, listener)
+}
+
+type dashboardsApplyConfig struct {
+	Plugin   string
+	BaseURL  string
+	APIKey   string
+	RootPath string
+}
+
+type dashboardsApplyOutput struct {
+	Plugin     string   `json:"plugin"`
+	Provider   string   `json:"provider"`
+	Repository string   `json:"repositoryRoot"`
+	CreatedIDs []string `json:"createdIds"`
+	UpdatedIDs []string `json:"updatedIds"`
+}
+
+func (a *app) runDashboards(args []string) error {
+	if len(args) == 0 || (len(args) == 1 && isHelpToken(args[0])) {
+		a.printDashboardsHelp()
+		return flag.ErrHelp
+	}
+	if args[0] != "apply" {
+		return fmt.Errorf("unknown dashboards command %q", args[0])
+	}
+
+	config, err := parseDashboardsApplyConfig(args[1:], a.stderr, a.lookupEnv, a.getwd)
+	if err != nil {
+		return err
+	}
+	return a.applyDashboards(config)
+}
+
+func (a *app) applyDashboards(config dashboardsApplyConfig) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	result, err := dashboards.Apply(ctx, config.RootPath, dashboards.ApplyOptions{
+		Plugin:  config.Plugin,
+		BaseURL: config.BaseURL,
+		APIKey:  config.APIKey,
+	})
+	if err != nil {
+		return err
+	}
+	return writeJSONObject(a.stdout, dashboardsApplyOutput{
+		Plugin:     result.Plugin,
+		Provider:   result.Provider,
+		Repository: config.RootPath,
+		CreatedIDs: result.Created,
+		UpdatedIDs: result.Updated,
+	})
 }
 
 func (a *app) runTUI(root rootConfig, args []string) error {
@@ -475,6 +550,7 @@ func (a *app) printRootHelp() {
 	fmt.Fprintln(a.stderr, "  rein [global flags] <service> <verb> [flags]")
 	fmt.Fprintln(a.stderr, "  rein [global flags] backup [flags] <destination>")
 	fmt.Fprintln(a.stderr, "  rein [global flags] daemon serve [flags]")
+	fmt.Fprintln(a.stderr, "  rein dashboards apply [flags]")
 	fmt.Fprintln(a.stderr, "  rein [global flags] doctor")
 	fmt.Fprintln(a.stderr, "  rein [global flags] describe-as=<format>")
 	fmt.Fprintln(a.stderr, "  rein [global flags] restore [flags] <source>")
@@ -508,6 +584,7 @@ func (a *app) printRootHelp() {
 	fmt.Fprintln(a.stderr, "  backup\tCheckpoint SQLite WAL and atomically copy the selected instance state.")
 	fmt.Fprintln(a.stderr, "  tui\tTerminal UI over the canonical gRPC surface.")
 	fmt.Fprintln(a.stderr, "  daemon serve\tStart the daemon and expose the canonical gRPC surface.")
+	fmt.Fprintln(a.stderr, "  dashboards apply\tApply reference OTLP dashboards to a SigNoz workspace.")
 	fmt.Fprintln(a.stderr, "  doctor\tEmit JSON diagnostics for daemon health and local instance readiness.")
 	fmt.Fprintln(a.stderr, "  describe-as=<format>\tEmit a stable machine-consumable surface description.")
 	fmt.Fprintln(a.stderr, "  restore\tAtomically replace the selected instance state from a backup copy.")
@@ -534,6 +611,21 @@ func (a *app) printDaemonHelp() {
 	for _, flag := range daemonServeFlagDescriptions() {
 		fmt.Fprintf(a.stderr, "  --%s %s\n    %s\n", flag.Name, flag.Type, flag.Description)
 	}
+}
+
+func (a *app) printDashboardsHelp() {
+	fmt.Fprintln(a.stderr, "Usage:")
+	fmt.Fprintln(a.stderr, "  rein dashboards apply [flags]")
+	fmt.Fprintln(a.stderr)
+	fmt.Fprintln(a.stderr, "Apply the reference rein-dashboards plugin to a SigNoz API endpoint.")
+	fmt.Fprintln(a.stderr)
+	fmt.Fprintln(a.stderr, "Flags:")
+	fmt.Fprintln(a.stderr, "  --plugin string")
+	fmt.Fprintln(a.stderr, "    Dashboards plugin name (default \"rein-dashboards\").")
+	fmt.Fprintln(a.stderr, "  --signoz-url string")
+	fmt.Fprintln(a.stderr, "    SigNoz base URL (or SIGNOZ_BASE_URL / SIGNOZ_URL).")
+	fmt.Fprintln(a.stderr, "  --signoz-api-key string")
+	fmt.Fprintln(a.stderr, "    SigNoz API key (or SIGNOZ_API_KEY).")
 }
 
 func (a *app) printDescribeHelp() {

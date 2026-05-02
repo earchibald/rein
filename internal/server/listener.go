@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -59,7 +60,8 @@ func Listen(config ListenerConfig) (net.Listener, error) {
 
 	switch config.Network {
 	case "tcp":
-		return net.Listen("tcp", config.Address)
+		var listenConfig net.ListenConfig
+		return listenConfig.Listen(context.Background(), "tcp", config.Address)
 	case "unix":
 		return listenUnix(config)
 	default:
@@ -101,7 +103,8 @@ func listenUnix(config ListenerConfig) (net.Listener, error) {
 		return nil, err
 	}
 
-	listener, err := net.Listen("unix", config.Address)
+	var listenConfig net.ListenConfig
+	listener, err := listenConfig.Listen(context.Background(), "unix", config.Address)
 	if err != nil {
 		return nil, fmt.Errorf("listen on unix socket %q: %w", config.Address, err)
 	}

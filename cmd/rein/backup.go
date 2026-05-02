@@ -163,7 +163,11 @@ func stopInstanceDaemon(layout instance.Layout, timeout time.Duration) error {
 }
 
 func socketReachable(path string) bool {
-	conn, err := net.DialTimeout("unix", path, 250*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+
+	dialer := net.Dialer{Timeout: 250 * time.Millisecond}
+	conn, err := dialer.DialContext(ctx, "unix", path)
 	if err != nil {
 		return false
 	}

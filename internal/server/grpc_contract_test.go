@@ -249,12 +249,12 @@ func findMethodDescriptor(t testing.TB, fullMethod string) protoreflect.MethodDe
 		t.Fatalf("FindDescriptorByName(%q) error = %v", parts[0], err)
 	}
 
-	service, ok := serviceDescriptor.(protoreflect.ServiceDescriptor)
+	serviceDesc, ok := serviceDescriptor.(protoreflect.ServiceDescriptor)
 	if !ok {
 		t.Fatalf("descriptor %q is %T, want service descriptor", parts[0], serviceDescriptor)
 	}
 
-	method := service.Methods().ByName(protoreflect.Name(parts[1]))
+	method := serviceDesc.Methods().ByName(protoreflect.Name(parts[1]))
 	if method == nil {
 		t.Fatalf("service %q missing method %q", parts[0], parts[1])
 	}
