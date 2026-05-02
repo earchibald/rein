@@ -79,6 +79,28 @@ func TestMigrateDownStepsRejectsInvalidStepCount(t *testing.T) {
 	}
 }
 
+func TestMigrateDownStepsDropsSchema(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	cfg := InMemoryConfig(t.Name())
+
+	store, err := OpenAndMigrate(ctx, cfg)
+	if err != nil {
+		t.Fatalf("OpenAndMigrate() error = %v", err)
+	}
+
+	if err := MigrateDownSteps(ctx, cfg, 1); err != nil {
+		t.Fatalf("MigrateDownSteps() error = %v", err)
+	}
+
+	assertTableExists(t, store.DB(), "projects", false)
+
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+}
+
 func assertTableExists(t *testing.T, db *sql.DB, table string, want bool) {
 	t.Helper()
 

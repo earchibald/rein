@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"embed"
 	"errors"
 	"fmt"
@@ -61,28 +62,44 @@ func runMigrations(ctx context.Context, cfg Config, apply func(*migrate.Migrate)
 		}
 	}()
 
-	sourceDriver, err := iofs.New(migrationsFS, "migrations")
+	migrator, err := newMigrator(normalized, db)
 	if err != nil {
-		return fmt.Errorf("sqlite: init migration source: %w", err)
-	}
-
-	dbDriver, err := migratesqlite.WithInstance(db, &migratesqlite.Config{
-		MigrationsTable: normalized.MigrationsTable,
-		DatabaseName:    normalized.Path,
-	})
-	if err != nil {
-		return fmt.Errorf("sqlite: init migration database driver: %w", err)
-	}
-
-	migrator, err := migrate.NewWithInstance("iofs", sourceDriver, driverName, dbDriver)
-	if err != nil {
-		return fmt.Errorf("sqlite: init migrator: %w", err)
+		return err
 	}
 	defer func() {
 		sourceErr, closeErr := migrator.Close()
 		err = errors.Join(err, sourceErr, closeErr)
 	}()
 
+	return applyMigrator(migrator, apply)
+}
+
+func newMigrator(cfg Config, db *sql.DB) (*migrate.Migrate, error) {
+	sourceDriver, err := iofs.New(migrationsFS, "migrations")
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: init migration source: %w", err)
+	}
+
+	dbDriver, err := migratesqlite.WithInstance(db, &migratesqlite.Config{
+		MigrationsTable: cfg.MigrationsTable,
+		DatabaseName:    cfg.Path,
+	})
+	if err != nil {
+		_ = sourceDriver.Close()
+		return nil, fmt.Errorf("sqlite: init migration database driver: %w", err)
+	}
+
+	migrator, err := migrate.NewWithInstance("iofs", sourceDriver, driverName, dbDriver)
+	if err != nil {
+		_ = sourceDriver.Close()
+		_ = dbDriver.Close()
+		return nil, fmt.Errorf("sqlite: init migrator: %w", err)
+	}
+
+	return migrator, nil
+}
+
+func applyMigrator(migrator *migrate.Migrate, apply func(*migrate.Migrate) error) error {
 	if err := apply(migrator); err != nil {
 		return fmt.Errorf("sqlite: apply migrations: %w", err)
 	}

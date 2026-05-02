@@ -69,6 +69,37 @@ func TestValidatePeerCredentialsRejectsDifferentUID(t *testing.T) {
 	}
 }
 
+func TestListenTCPAllocatesLoopbackPort(t *testing.T) {
+	t.Parallel()
+
+	listener, err := Listen(ListenerConfig{
+		Network: "tcp",
+		Address: "127.0.0.1:0",
+	})
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = listener.Close()
+	})
+
+	if listener.Addr().String() == "" {
+		t.Fatal("Listen() returned empty tcp address")
+	}
+}
+
+func TestListenRejectsUnsupportedNetwork(t *testing.T) {
+	t.Parallel()
+
+	_, err := Listen(ListenerConfig{
+		Network: "udp",
+		Address: "127.0.0.1:0",
+	})
+	if err == nil {
+		t.Fatal("Listen() error = nil, want non-nil")
+	}
+}
+
 func testSocketPath(t *testing.T) string {
 	t.Helper()
 

@@ -2,6 +2,7 @@
 # Run `just` or `just --list` to see available recipes.
 
 buf := "go run github.com/bufbuild/buf/cmd/buf@v1.59.0"
+gotestsum := "go run gotest.tools/gotestsum@v1.10.0"
 
 default:
     @just --list
@@ -18,11 +19,16 @@ build:
 
 # Run tests
 test:
-    go test ./...
+    {{gotestsum}} --format pkgname -- ./...
 
 # Run tests with race detector
 test-race:
-    go test -race ./...
+    {{gotestsum}} --format pkgname -- -race ./...
+
+# Run tests with coverage output
+test-cover:
+    {{gotestsum}} --format pkgname -- -coverprofile=coverage.out -covermode=atomic ./...
+    go tool cover -func=coverage.out
 
 # Run golangci-lint
 lint:
@@ -45,10 +51,11 @@ tidy:
 clean:
     rm -rf bin/
 
-# Run build + lint + test (CI equivalent)
-ci: build lint test
+# Run build + vet + lint + race-tested suite (CI equivalent)
+ci: build vet lint test-race
 
 # Install development tools
 install-tools:
+    go install gotest.tools/gotestsum@v1.10.0
     go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
     go install golang.org/x/tools/cmd/goimports@latest

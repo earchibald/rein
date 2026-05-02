@@ -6,8 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
+	"strings"
 	"time"
 
+	"github.com/golang-migrate/migrate/v4"
 	_ "modernc.org/sqlite"
 )
 
@@ -90,11 +93,64 @@ func Open(ctx context.Context, cfg Config) (*Store, error) {
 }
 
 func OpenAndMigrate(ctx context.Context, cfg Config) (*Store, error) {
-	if err := MigrateUp(ctx, cfg); err != nil {
+	normalized, err := cfg.normalize()
+	if err != nil {
 		return nil, err
 	}
 
-	return Open(ctx, cfg)
+	migrationDB, err := openDB(ctx, normalized)
+	if err != nil {
+		return nil, err
+	}
+
+	migrator, err := newMigrator(normalized, migrationDB)
+	if err != nil {
+		_ = migrationDB.Close()
+		return nil, err
+	}
+
+	if err := applyMigrator(migrator, func(m *migrate.Migrate) error {
+		if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+			return err
+		}
+		return nil
+	}); err != nil {
+		sourceErr, closeErr := migrator.Close()
+		err = errors.Join(err, sourceErr, closeErr)
+		return nil, err
+	}
+
+	db, err := openDB(ctx, normalized)
+	if err != nil {
+		sourceErr, closeErr := migrator.Close()
+		err = errors.Join(err, sourceErr, closeErr)
+		return nil, err
+	}
+
+	sourceErr, closeErr := migrator.Close()
+	if sourceErr != nil || closeErr != nil {
+		_ = db.Close()
+		return nil, errors.Join(sourceErr, closeErr)
+	}
+
+	return &Store{
+		db:     db,
+		config: normalized,
+	}, nil
+}
+
+func InMemoryConfig(name string) Config {
+	if name == "" {
+		name = "rein"
+	}
+
+	return Config{
+		Path: fmt.Sprintf("file:%s?mode=memory&cache=shared", url.PathEscape(name)),
+	}
+}
+
+func OpenInMemoryAndMigrate(ctx context.Context, name string) (*Store, error) {
+	return OpenAndMigrate(ctx, InMemoryConfig(name))
 }
 
 func (s *Store) Close() error {
@@ -301,7 +357,7 @@ func openDB(ctx context.Context, cfg Config) (*sql.DB, error) {
 		return nil, fmt.Errorf("sqlite: ping %q: %w", cfg.Path, err)
 	}
 
-	if err := applyPragmas(ctx, db, cfg.BusyTimeout); err != nil {
+	if err := applyPragmas(ctx, db, cfg); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -309,11 +365,16 @@ func openDB(ctx context.Context, cfg Config) (*sql.DB, error) {
 	return db, nil
 }
 
-func applyPragmas(ctx context.Context, db *sql.DB, busyTimeout time.Duration) error {
+func applyPragmas(ctx context.Context, db *sql.DB, cfg Config) error {
+	journalMode := "WAL"
+	if isInMemoryPath(cfg.Path) {
+		journalMode = "MEMORY"
+	}
+
 	statements := []string{
 		"PRAGMA foreign_keys = ON",
-		fmt.Sprintf("PRAGMA busy_timeout = %d", busyTimeout.Milliseconds()),
-		"PRAGMA journal_mode = WAL",
+		fmt.Sprintf("PRAGMA busy_timeout = %d", cfg.BusyTimeout.Milliseconds()),
+		fmt.Sprintf("PRAGMA journal_mode = %s", journalMode),
 		"PRAGMA synchronous = NORMAL",
 	}
 
@@ -324,6 +385,10 @@ func applyPragmas(ctx context.Context, db *sql.DB, busyTimeout time.Duration) er
 	}
 
 	return nil
+}
+
+func isInMemoryPath(path string) bool {
+	return path == ":memory:" || strings.Contains(path, "mode=memory")
 }
 
 func (c Config) normalize() (Config, error) {

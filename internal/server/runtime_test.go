@@ -2,15 +2,11 @@ package server
 
 import (
 	"context"
-	"net"
 	"testing"
 	"time"
 
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
-	"google.golang.org/grpc/test/bufconn"
 
 	reinv1 "github.com/earchibald/rein/gen/go/rein/v1"
 )
@@ -43,41 +39,22 @@ func TestRuntimeRegistersAllServices(t *testing.T) {
 func TestRuntimeServeBufconnReturnsUnimplemented(t *testing.T) {
 	t.Parallel()
 
-	runtime := New(Options{})
-	listener := bufconn.Listen(1024 * 1024)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- runtime.Serve(ctx, listener)
-	}()
-
-	conn, err := grpc.NewClient(
-		"passthrough:///bufnet",
-		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
-			return listener.Dial()
-		}),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	if err != nil {
-		t.Fatalf("grpc.NewClient() error = %v", err)
-	}
-	defer conn.Close()
+	harness := newBufconnHarness(t, Options{})
 
 	rpcCtx, rpcCancel := context.WithTimeout(context.Background(), time.Second)
 	defer rpcCancel()
 
-	client := reinv1.NewProjectServiceClient(conn)
-	_, err = client.GetProject(rpcCtx, &reinv1.GetProjectRequest{Id: "project-1"})
+	client := reinv1.NewProjectServiceClient(harness.conn)
+	_, err := client.GetProject(rpcCtx, &reinv1.GetProjectRequest{Id: "project-1"})
 	if status.Code(err) != codes.Unimplemented {
 		t.Fatalf("GetProject() status = %v, want %v", status.Code(err), codes.Unimplemented)
 	}
+}
 
-	cancel()
+func TestRuntimeServeRejectsNilListener(t *testing.T) {
+	t.Parallel()
 
-	if err := <-errCh; err != nil {
-		t.Fatalf("Serve() error = %v", err)
+	if err := New(Options{}).Serve(context.Background(), nil); err == nil {
+		t.Fatal("Serve() error = nil, want non-nil")
 	}
 }
