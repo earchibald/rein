@@ -1,6 +1,9 @@
 package service
 
-import reinv1 "github.com/earchibald/rein/gen/go/rein/v1"
+import (
+	reinv1 "github.com/earchibald/rein/gen/go/rein/v1"
+	"github.com/earchibald/rein/internal/adapter"
+)
 
 // Set contains the in-process gRPC service implementations registered by the
 // server runtime.
@@ -13,8 +16,9 @@ type Set struct {
 }
 
 func NewSet() Set {
+	adapterServer, _ := NewAdapterServerFromRoot(".", adapter.DiscoveryOptions{})
 	return Set{
-		Adapter:   AdapterServer{},
+		Adapter:   adapterServer,
 		Execution: ExecutionServer{},
 		Issue:     IssueServer{},
 		Project:   ProjectServer{},
@@ -22,9 +26,21 @@ func NewSet() Set {
 	}
 }
 
+func NewSetFromRoot(root string, options adapter.DiscoveryOptions) (Set, error) {
+	adapterServer, err := NewAdapterServerFromRoot(root, options)
+	return Set{
+		Adapter:   adapterServer,
+		Execution: ExecutionServer{},
+		Issue:     IssueServer{},
+		Project:   ProjectServer{},
+		Workflow:  WorkflowServer{},
+	}, err
+}
+
 func (s Set) WithDefaults() Set {
 	if s.Adapter == nil {
-		s.Adapter = AdapterServer{}
+		adapterServer, _ := NewAdapterServerFromRoot(".", adapter.DiscoveryOptions{})
+		s.Adapter = adapterServer
 	}
 	if s.Execution == nil {
 		s.Execution = ExecutionServer{}
@@ -40,10 +56,6 @@ func (s Set) WithDefaults() Set {
 	}
 
 	return s
-}
-
-type AdapterServer struct {
-	reinv1.UnimplementedAdapterServiceServer
 }
 
 type ExecutionServer struct {

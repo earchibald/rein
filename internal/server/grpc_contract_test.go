@@ -127,20 +127,26 @@ func TestRuntimeUnaryRPCErrorContracts(t *testing.T) {
 
 			reply := emptyReply(t, contract.output)
 			err := conn.Invoke(rpcCtx, contract.fullMethod, contract.newRequest(), reply)
-			if err == nil {
-				t.Fatal("Invoke() error = nil, want non-nil")
-			}
+			expectation := unaryExpectation(contract)
+			if expectation.code == codes.OK {
+				if err != nil {
+					t.Fatalf("%s error = %v, want nil", contract.fullMethod, err)
+				}
+			} else {
+				if err == nil {
+					t.Fatal("Invoke() error = nil, want non-nil")
+				}
 
-			st, ok := status.FromError(err)
-			if !ok {
-				t.Fatalf("status.FromError(%v) = !ok", err)
-			}
-			if st.Code() != codes.Unimplemented {
-				t.Fatalf("%s code = %v, want %v", contract.fullMethod, st.Code(), codes.Unimplemented)
-			}
-			wantMessage := "method " + contract.method + " not implemented"
-			if st.Message() != wantMessage {
-				t.Fatalf("%s message = %q, want %q", contract.fullMethod, st.Message(), wantMessage)
+				st, ok := status.FromError(err)
+				if !ok {
+					t.Fatalf("status.FromError(%v) = !ok", err)
+				}
+				if st.Code() != expectation.code {
+					t.Fatalf("%s code = %v, want %v", contract.fullMethod, st.Code(), expectation.code)
+				}
+				if st.Message() != expectation.message {
+					t.Fatalf("%s message = %q, want %q", contract.fullMethod, st.Message(), expectation.message)
+				}
 			}
 
 			mu.Lock()
@@ -155,6 +161,27 @@ func TestRuntimeUnaryRPCErrorContracts(t *testing.T) {
 	cancel()
 	if err := <-errCh; err != nil {
 		t.Fatalf("Serve() error = %v", err)
+	}
+}
+
+type unaryRPCExpectation struct {
+	code    codes.Code
+	message string
+}
+
+func unaryExpectation(contract grpcContract) unaryRPCExpectation {
+	switch contract.fullMethod {
+	case reinv1.AdapterService_ListAdapters_FullMethodName:
+		return unaryRPCExpectation{code: codes.OK}
+	case reinv1.AdapterService_GetAdapter_FullMethodName:
+		return unaryRPCExpectation{code: codes.InvalidArgument, message: "id is required"}
+	case reinv1.AdapterService_ValidateAdapter_FullMethodName:
+		return unaryRPCExpectation{code: codes.InvalidArgument, message: "adapter is required"}
+	default:
+		return unaryRPCExpectation{
+			code:    codes.Unimplemented,
+			message: "method " + contract.method + " not implemented",
+		}
 	}
 }
 
