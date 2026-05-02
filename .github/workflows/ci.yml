@@ -21,6 +21,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Install just
+        uses: taiki-e/install-action@just
+
       - name: Lint and generate protobuf stubs
         run: |
           just proto
