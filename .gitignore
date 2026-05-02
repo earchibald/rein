@@ -1,0 +1,17 @@
+# Build output
+bin/
+
+# Go test cache
+*.test
+
+# macOS
+.DS_Store
+
+# Editor directories
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# golangci-lint cache
+.golangci-lint-cache/
