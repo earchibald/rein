@@ -28,10 +28,16 @@ const (
 // ExecutionServiceClient is the client API for ExecutionService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// ExecutionService manages workflow executions stored by the daemon.
 type ExecutionServiceClient interface {
+	// List executions stored in the daemon.
 	ListExecutions(ctx context.Context, in *ListExecutionsRequest, opts ...grpc.CallOption) (*ListExecutionsResponse, error)
+	// Get a single execution by id.
 	GetExecution(ctx context.Context, in *GetExecutionRequest, opts ...grpc.CallOption) (*GetExecutionResponse, error)
+	// Start a workflow execution for an issue.
 	StartExecution(ctx context.Context, in *StartExecutionRequest, opts ...grpc.CallOption) (*StartExecutionResponse, error)
+	// Cancel a running execution.
 	CancelExecution(ctx context.Context, in *CancelExecutionRequest, opts ...grpc.CallOption) (*CancelExecutionResponse, error)
 }
 
@@ -86,10 +92,16 @@ func (c *executionServiceClient) CancelExecution(ctx context.Context, in *Cancel
 // ExecutionServiceServer is the server API for ExecutionService service.
 // All implementations should embed UnimplementedExecutionServiceServer
 // for forward compatibility.
+//
+// ExecutionService manages workflow executions stored by the daemon.
 type ExecutionServiceServer interface {
+	// List executions stored in the daemon.
 	ListExecutions(context.Context, *ListExecutionsRequest) (*ListExecutionsResponse, error)
+	// Get a single execution by id.
 	GetExecution(context.Context, *GetExecutionRequest) (*GetExecutionResponse, error)
+	// Start a workflow execution for an issue.
 	StartExecution(context.Context, *StartExecutionRequest) (*StartExecutionResponse, error)
+	// Cancel a running execution.
 	CancelExecution(context.Context, *CancelExecutionRequest) (*CancelExecutionResponse, error)
 }
 

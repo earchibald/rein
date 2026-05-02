@@ -27,9 +27,14 @@ const (
 // AdapterServiceClient is the client API for AdapterService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// AdapterService manages adapters available to the daemon.
 type AdapterServiceClient interface {
+	// List adapters available to the daemon.
 	ListAdapters(ctx context.Context, in *ListAdaptersRequest, opts ...grpc.CallOption) (*ListAdaptersResponse, error)
+	// Get a single adapter by id.
 	GetAdapter(ctx context.Context, in *GetAdapterRequest, opts ...grpc.CallOption) (*GetAdapterResponse, error)
+	// Validate an adapter payload without storing it.
 	ValidateAdapter(ctx context.Context, in *ValidateAdapterRequest, opts ...grpc.CallOption) (*ValidateAdapterResponse, error)
 }
 
@@ -74,9 +79,14 @@ func (c *adapterServiceClient) ValidateAdapter(ctx context.Context, in *Validate
 // AdapterServiceServer is the server API for AdapterService service.
 // All implementations should embed UnimplementedAdapterServiceServer
 // for forward compatibility.
+//
+// AdapterService manages adapters available to the daemon.
 type AdapterServiceServer interface {
+	// List adapters available to the daemon.
 	ListAdapters(context.Context, *ListAdaptersRequest) (*ListAdaptersResponse, error)
+	// Get a single adapter by id.
 	GetAdapter(context.Context, *GetAdapterRequest) (*GetAdapterResponse, error)
+	// Validate an adapter payload without storing it.
 	ValidateAdapter(context.Context, *ValidateAdapterRequest) (*ValidateAdapterResponse, error)
 }
 

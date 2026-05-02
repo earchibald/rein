@@ -22,12 +22,17 @@ const (
 )
 
 type ListIssuesRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Page          *PageRequest           `protobuf:"bytes,1,opt,name=page,proto3" json:"page,omitempty"`
-	ProjectId     string                 `protobuf:"bytes,2,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
-	Status        IssueStatus            `protobuf:"varint,3,opt,name=status,proto3,enum=rein.v1.IssueStatus" json:"status,omitempty"`
-	Assignee      string                 `protobuf:"bytes,4,opt,name=assignee,proto3" json:"assignee,omitempty"`
-	Query         string                 `protobuf:"bytes,5,opt,name=query,proto3" json:"query,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Paginate issue results. Pass JSON matching PageRequest.
+	Page *PageRequest `protobuf:"bytes,1,opt,name=page,proto3" json:"page,omitempty"`
+	// Filter issues by project id.
+	ProjectId string `protobuf:"bytes,2,opt,name=project_id,json=projectId,proto3" json:"project_id,omitempty"`
+	// Filter issues by status.
+	Status IssueStatus `protobuf:"varint,3,opt,name=status,proto3,enum=rein.v1.IssueStatus" json:"status,omitempty"`
+	// Filter issues by assignee.
+	Assignee string `protobuf:"bytes,4,opt,name=assignee,proto3" json:"assignee,omitempty"`
+	// Match issue id, title, summary, workflow id, or assignee.
+	Query         string `protobuf:"bytes,5,opt,name=query,proto3" json:"query,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -150,8 +155,9 @@ func (x *ListIssuesResponse) GetPage() *PageResponse {
 }
 
 type GetIssueRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Issue identifier.
+	Id            string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -238,8 +244,9 @@ func (x *GetIssueResponse) GetIssue() *Issue {
 }
 
 type CreateIssueRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Issue         *Issue                 `protobuf:"bytes,1,opt,name=issue,proto3" json:"issue,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Issue payload. Pass JSON matching Issue.
+	Issue         *Issue `protobuf:"bytes,1,opt,name=issue,proto3" json:"issue,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -326,8 +333,9 @@ func (x *CreateIssueResponse) GetIssue() *Issue {
 }
 
 type UpdateIssueRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Issue         *Issue                 `protobuf:"bytes,1,opt,name=issue,proto3" json:"issue,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Replacement issue payload. Pass JSON matching Issue.
+	Issue         *Issue `protobuf:"bytes,1,opt,name=issue,proto3" json:"issue,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

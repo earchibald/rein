@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"google.golang.org/grpc/codes"
@@ -43,8 +44,31 @@ type ManagedAdapterServer struct {
 	catalog ManagedCatalog
 }
 
-func (s *ManagedAdapterServer) ListAdapters(_ context.Context, _ *reinv1.ListAdaptersRequest) (*reinv1.ListAdaptersResponse, error) {
-	return &reinv1.ListAdaptersResponse{Adapters: s.catalog.List()}, nil
+func (s *ManagedAdapterServer) ListAdapters(_ context.Context, req *reinv1.ListAdaptersRequest) (*reinv1.ListAdaptersResponse, error) {
+	if s.catalog == nil {
+		return nil, status.Error(codes.FailedPrecondition, "adapter catalog is not configured")
+	}
+
+	adapters := s.catalog.List()
+	filtered := make([]*reinv1.Adapter, 0, len(adapters))
+	for _, adapter := range adapters {
+		if adapter == nil {
+			continue
+		}
+		if req.GetCategory() != reinv1.AdapterCategory_ADAPTER_CATEGORY_UNSPECIFIED && adapter.GetCategory() != req.GetCategory() {
+			continue
+		}
+		if req.GetEnabledOnly() && !adapter.GetEnabled() {
+			continue
+		}
+		filtered = append(filtered, adapter)
+	}
+
+	paged, page, err := paginateResults(filtered, req.GetPage())
+	if err != nil {
+		return nil, err
+	}
+	return &reinv1.ListAdaptersResponse{Adapters: paged, Page: page}, nil
 }
 
 func (s *ManagedAdapterServer) GetAdapter(_ context.Context, req *reinv1.GetAdapterRequest) (*reinv1.GetAdapterResponse, error) {
@@ -93,6 +117,28 @@ func (s *ManagedWorkflowServer) GetWorkflow(ctx context.Context, req *reinv1.Get
 	return &reinv1.GetWorkflowResponse{Workflow: workflowEntity}, nil
 }
 
+func (s *ManagedWorkflowServer) ListWorkflows(ctx context.Context, req *reinv1.ListWorkflowsRequest) (*reinv1.ListWorkflowsResponse, error) {
+	workflows, err := listStoredMessages(ctx, s.store, sqlite.WorkflowKind, func() *reinv1.Workflow { return &reinv1.Workflow{} })
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "list workflows: %v", err)
+	}
+
+	query := strings.ToLower(strings.TrimSpace(req.GetQuery()))
+	filtered := make([]*reinv1.Workflow, 0, len(workflows))
+	for _, workflowEntity := range workflows {
+		if query != "" && !matchesQuery(query, workflowEntity.GetId(), workflowEntity.GetName(), workflowEntity.GetDescription(), workflowEntity.GetVersion()) {
+			continue
+		}
+		filtered = append(filtered, workflowEntity)
+	}
+
+	paged, page, err := paginateResults(filtered, req.GetPage())
+	if err != nil {
+		return nil, err
+	}
+	return &reinv1.ListWorkflowsResponse{Workflows: paged, Page: page}, nil
+}
+
 func (s *ManagedWorkflowServer) ValidateWorkflow(_ context.Context, req *reinv1.ValidateWorkflowRequest) (*reinv1.ValidateWorkflowResponse, error) {
 	if req.GetWorkflow() == nil {
 		return nil, status.Error(codes.InvalidArgument, "workflow is required")
@@ -107,6 +153,31 @@ func (s *ManagedWorkflowServer) ValidateWorkflow(_ context.Context, req *reinv1.
 type ManagedProjectServer struct {
 	reinv1.UnimplementedProjectServiceServer
 	store *sqlite.Store
+}
+
+func (s *ManagedProjectServer) ListProjects(ctx context.Context, req *reinv1.ListProjectsRequest) (*reinv1.ListProjectsResponse, error) {
+	projects, err := listStoredMessages(ctx, s.store, sqlite.ProjectKind, func() *reinv1.Project { return &reinv1.Project{} })
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "list projects: %v", err)
+	}
+
+	query := strings.ToLower(strings.TrimSpace(req.GetQuery()))
+	filtered := make([]*reinv1.Project, 0, len(projects))
+	for _, project := range projects {
+		if req.GetStatus() != reinv1.ProjectStatus_PROJECT_STATUS_UNSPECIFIED && project.GetStatus() != req.GetStatus() {
+			continue
+		}
+		if query != "" && !matchesQuery(query, project.GetId(), project.GetSlug(), project.GetDisplayName(), project.GetSummary()) {
+			continue
+		}
+		filtered = append(filtered, project)
+	}
+
+	paged, page, err := paginateResults(filtered, req.GetPage())
+	if err != nil {
+		return nil, err
+	}
+	return &reinv1.ListProjectsResponse{Projects: paged, Page: page}, nil
 }
 
 func (s *ManagedProjectServer) CreateProject(ctx context.Context, req *reinv1.CreateProjectRequest) (*reinv1.CreateProjectResponse, error) {
@@ -145,9 +216,76 @@ func (s *ManagedProjectServer) GetProject(ctx context.Context, req *reinv1.GetPr
 	return &reinv1.GetProjectResponse{Project: project}, nil
 }
 
+func (s *ManagedProjectServer) UpdateProject(ctx context.Context, req *reinv1.UpdateProjectRequest) (*reinv1.UpdateProjectResponse, error) {
+	if req.GetProject() == nil {
+		return nil, status.Error(codes.InvalidArgument, "project is required")
+	}
+
+	project := proto.Clone(req.GetProject()).(*reinv1.Project)
+	if strings.TrimSpace(project.GetId()) == "" {
+		return nil, status.Error(codes.InvalidArgument, "project.id is required")
+	}
+
+	current := &reinv1.Project{}
+	record, err := loadStoredProto(ctx, s.store, sqlite.ProjectKind, project.GetId(), current)
+	if err != nil {
+		return nil, toStatusError("project", project.GetId(), err)
+	}
+
+	if project.GetStatus() == reinv1.ProjectStatus_PROJECT_STATUS_UNSPECIFIED {
+		project.Status = current.GetStatus()
+	}
+	if project.GetCreatedTime() == nil {
+		project.CreatedTime = current.GetCreatedTime()
+	}
+	if project.Labels == nil {
+		project.Labels = cloneMap(current.GetLabels())
+	}
+	if project.Labels == nil {
+		project.Labels = map[string]string{}
+	}
+	project.UpdatedTime = timestamppb.Now()
+
+	if _, err := updateStoredProto(ctx, s.store, sqlite.ProjectKind, project.GetId(), record.LockVersion, project); err != nil {
+		return nil, status.Errorf(codes.Internal, "update project %q: %v", project.GetId(), err)
+	}
+	return &reinv1.UpdateProjectResponse{Project: project}, nil
+}
+
 type ManagedIssueServer struct {
 	reinv1.UnimplementedIssueServiceServer
 	store *sqlite.Store
+}
+
+func (s *ManagedIssueServer) ListIssues(ctx context.Context, req *reinv1.ListIssuesRequest) (*reinv1.ListIssuesResponse, error) {
+	issues, err := listStoredMessages(ctx, s.store, sqlite.IssueKind, func() *reinv1.Issue { return &reinv1.Issue{} })
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "list issues: %v", err)
+	}
+
+	query := strings.ToLower(strings.TrimSpace(req.GetQuery()))
+	filtered := make([]*reinv1.Issue, 0, len(issues))
+	for _, issue := range issues {
+		if req.GetProjectId() != "" && issue.GetProjectId() != req.GetProjectId() {
+			continue
+		}
+		if req.GetStatus() != reinv1.IssueStatus_ISSUE_STATUS_UNSPECIFIED && issue.GetStatus() != req.GetStatus() {
+			continue
+		}
+		if req.GetAssignee() != "" && issue.GetAssignee() != req.GetAssignee() {
+			continue
+		}
+		if query != "" && !matchesQuery(query, issue.GetId(), issue.GetProjectId(), issue.GetTitle(), issue.GetSummary(), issue.GetWorkflowId(), issue.GetAssignee()) {
+			continue
+		}
+		filtered = append(filtered, issue)
+	}
+
+	paged, page, err := paginateResults(filtered, req.GetPage())
+	if err != nil {
+		return nil, err
+	}
+	return &reinv1.ListIssuesResponse{Issues: paged, Page: page}, nil
 }
 
 func (s *ManagedIssueServer) CreateIssue(ctx context.Context, req *reinv1.CreateIssueRequest) (*reinv1.CreateIssueResponse, error) {
@@ -189,11 +327,74 @@ func (s *ManagedIssueServer) GetIssue(ctx context.Context, req *reinv1.GetIssueR
 	return &reinv1.GetIssueResponse{Issue: issue}, nil
 }
 
+func (s *ManagedIssueServer) UpdateIssue(ctx context.Context, req *reinv1.UpdateIssueRequest) (*reinv1.UpdateIssueResponse, error) {
+	if req.GetIssue() == nil {
+		return nil, status.Error(codes.InvalidArgument, "issue is required")
+	}
+
+	issue := proto.Clone(req.GetIssue()).(*reinv1.Issue)
+	if strings.TrimSpace(issue.GetId()) == "" {
+		return nil, status.Error(codes.InvalidArgument, "issue.id is required")
+	}
+	if strings.TrimSpace(issue.GetProjectId()) == "" {
+		return nil, status.Error(codes.InvalidArgument, "issue.project_id is required")
+	}
+
+	current := &reinv1.Issue{}
+	record, err := loadStoredProto(ctx, s.store, sqlite.IssueKind, issue.GetId(), current)
+	if err != nil {
+		return nil, toStatusError("issue", issue.GetId(), err)
+	}
+
+	if issue.GetStatus() == reinv1.IssueStatus_ISSUE_STATUS_UNSPECIFIED {
+		issue.Status = current.GetStatus()
+	}
+	if issue.GetCreatedTime() == nil {
+		issue.CreatedTime = current.GetCreatedTime()
+	}
+	if issue.Labels == nil {
+		issue.Labels = cloneMap(current.GetLabels())
+	}
+	if issue.Labels == nil {
+		issue.Labels = map[string]string{}
+	}
+	issue.UpdatedTime = timestamppb.Now()
+
+	if _, err := updateStoredProto(ctx, s.store, sqlite.IssueKind, issue.GetId(), record.LockVersion, issue); err != nil {
+		return nil, status.Errorf(codes.Internal, "update issue %q: %v", issue.GetId(), err)
+	}
+	return &reinv1.UpdateIssueResponse{Issue: issue}, nil
+}
+
 type ManagedExecutionServer struct {
 	reinv1.UnimplementedExecutionServiceServer
 	catalog ManagedCatalog
 	engine  *workflow.Engine
 	store   *sqlite.Store
+}
+
+func (s *ManagedExecutionServer) ListExecutions(ctx context.Context, req *reinv1.ListExecutionsRequest) (*reinv1.ListExecutionsResponse, error) {
+	executions, err := listStoredMessages(ctx, s.store, sqlite.ExecutionKind, func() *reinv1.Execution { return &reinv1.Execution{} })
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "list executions: %v", err)
+	}
+
+	filtered := make([]*reinv1.Execution, 0, len(executions))
+	for _, execution := range executions {
+		if req.GetIssueId() != "" && execution.GetIssueId() != req.GetIssueId() {
+			continue
+		}
+		if req.GetStatus() != reinv1.ExecutionStatus_EXECUTION_STATUS_UNSPECIFIED && execution.GetStatus() != req.GetStatus() {
+			continue
+		}
+		filtered = append(filtered, execution)
+	}
+
+	paged, page, err := paginateResults(filtered, req.GetPage())
+	if err != nil {
+		return nil, err
+	}
+	return &reinv1.ListExecutionsResponse{Executions: paged, Page: page}, nil
 }
 
 func (s *ManagedExecutionServer) StartExecution(ctx context.Context, req *reinv1.StartExecutionRequest) (*reinv1.StartExecutionResponse, error) {
@@ -415,6 +616,64 @@ func cloneMap(values map[string]string) map[string]string {
 		cloned[key] = value
 	}
 	return cloned
+}
+
+func listStoredMessages[T proto.Message](ctx context.Context, store *sqlite.Store, kind sqlite.EntityKind, newMessage func() T) ([]T, error) {
+	records, err := store.List(ctx, kind, sqlite.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	messages := make([]T, 0, len(records))
+	for _, record := range records {
+		message := newMessage()
+		if err := protojson.Unmarshal(record.Payload, message); err != nil {
+			return nil, err
+		}
+		messages = append(messages, message)
+	}
+	return messages, nil
+}
+
+func paginateResults[T any](items []T, page *reinv1.PageRequest) ([]T, *reinv1.PageResponse, error) {
+	offset := 0
+	pageSize := 0
+	if page != nil {
+		if strings.TrimSpace(page.GetPageToken()) != "" {
+			value, err := strconv.Atoi(page.GetPageToken())
+			if err != nil || value < 0 {
+				return nil, nil, status.Error(codes.InvalidArgument, "page.page_token must be a non-negative integer offset")
+			}
+			offset = value
+		}
+		pageSize = int(page.GetPageSize())
+		if pageSize < 0 {
+			return nil, nil, status.Error(codes.InvalidArgument, "page.page_size must be non-negative")
+		}
+	}
+
+	if offset > len(items) {
+		offset = len(items)
+	}
+	items = items[offset:]
+	if pageSize == 0 || pageSize >= len(items) {
+		if len(items) == 0 {
+			return items, nil, nil
+		}
+		return items, nil, nil
+	}
+
+	nextOffset := offset + pageSize
+	return items[:pageSize], &reinv1.PageResponse{NextPageToken: strconv.Itoa(nextOffset)}, nil
+}
+
+func matchesQuery(query string, candidates ...string) bool {
+	for _, candidate := range candidates {
+		if strings.Contains(strings.ToLower(candidate), query) {
+			return true
+		}
+	}
+	return false
 }
 
 func executionID(issueID string) string {

@@ -6,16 +6,24 @@ option go_package = "github.com/earchibald/rein/gen/go/rein/v1;reinv1";
 
 import "rein/v1/types.proto";
 
+// ExecutionService manages workflow executions stored by the daemon.
 service ExecutionService {
+  // List executions stored in the daemon.
   rpc ListExecutions(ListExecutionsRequest) returns (ListExecutionsResponse);
+  // Get a single execution by id.
   rpc GetExecution(GetExecutionRequest) returns (GetExecutionResponse);
+  // Start a workflow execution for an issue.
   rpc StartExecution(StartExecutionRequest) returns (StartExecutionResponse);
+  // Cancel a running execution.
   rpc CancelExecution(CancelExecutionRequest) returns (CancelExecutionResponse);
 }
 
 message ListExecutionsRequest {
+  // Paginate execution results. Pass JSON matching PageRequest.
   PageRequest page = 1;
+  // Filter executions by issue id.
   string issue_id = 2;
+  // Filter executions by status.
   ExecutionStatus status = 3;
 }
 
@@ -25,6 +33,7 @@ message ListExecutionsResponse {
 }
 
 message GetExecutionRequest {
+  // Execution identifier.
   string id = 1;
 }
 
@@ -33,9 +42,13 @@ message GetExecutionResponse {
 }
 
 message StartExecutionRequest {
+  // Issue identifier.
   string issue_id = 1;
+  // Workflow identifier.
   string workflow_id = 2;
+  // Actor requesting the execution.
   string requested_by = 3;
+  // Execution input values. Pass a JSON object.
   map<string, string> inputs = 4;
 }
 
@@ -44,7 +57,9 @@ message StartExecutionResponse {
 }
 
 message CancelExecutionRequest {
+  // Execution identifier.
   string id = 1;
+  // Human-readable cancellation reason.
   string reason = 2;
 }
 

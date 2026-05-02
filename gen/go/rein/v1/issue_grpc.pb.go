@@ -28,10 +28,16 @@ const (
 // IssueServiceClient is the client API for IssueService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// IssueService manages issues stored by the daemon.
 type IssueServiceClient interface {
+	// List issues stored in the daemon.
 	ListIssues(ctx context.Context, in *ListIssuesRequest, opts ...grpc.CallOption) (*ListIssuesResponse, error)
+	// Get a single issue by id.
 	GetIssue(ctx context.Context, in *GetIssueRequest, opts ...grpc.CallOption) (*GetIssueResponse, error)
+	// Create an issue record.
 	CreateIssue(ctx context.Context, in *CreateIssueRequest, opts ...grpc.CallOption) (*CreateIssueResponse, error)
+	// Update an issue record.
 	UpdateIssue(ctx context.Context, in *UpdateIssueRequest, opts ...grpc.CallOption) (*UpdateIssueResponse, error)
 }
 
@@ -86,10 +92,16 @@ func (c *issueServiceClient) UpdateIssue(ctx context.Context, in *UpdateIssueReq
 // IssueServiceServer is the server API for IssueService service.
 // All implementations should embed UnimplementedIssueServiceServer
 // for forward compatibility.
+//
+// IssueService manages issues stored by the daemon.
 type IssueServiceServer interface {
+	// List issues stored in the daemon.
 	ListIssues(context.Context, *ListIssuesRequest) (*ListIssuesResponse, error)
+	// Get a single issue by id.
 	GetIssue(context.Context, *GetIssueRequest) (*GetIssueResponse, error)
+	// Create an issue record.
 	CreateIssue(context.Context, *CreateIssueRequest) (*CreateIssueResponse, error)
+	// Update an issue record.
 	UpdateIssue(context.Context, *UpdateIssueRequest) (*UpdateIssueResponse, error)
 }
 

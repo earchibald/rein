@@ -4,37 +4,41 @@ import (
 	"bytes"
 	"flag"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/earchibald/rein/internal/instance"
 	"github.com/earchibald/rein/internal/server"
 )
 
-func TestParseRuntimeConfigUsesDefaultLiveInstance(t *testing.T) {
+func TestParseRootConfigUsesDefaultLiveInstance(t *testing.T) {
 	t.Parallel()
 
-	config, err := parseRuntimeConfig(nil, io.Discard, nil, func() (string, error) {
+	config, args, err := parseRootConfig([]string{"project", "list"}, io.Discard, nil, func() (string, error) {
 		return "/Users/tester", nil
 	})
 	if err != nil {
-		t.Fatalf("parseRuntimeConfig() error = %v", err)
+		t.Fatalf("parseRootConfig() error = %v", err)
 	}
 
+	if len(args) != 2 || args[0] != "project" || args[1] != "list" {
+		t.Fatalf("remaining args = %v, want project list", args)
+	}
 	if config.instance.Name != instance.DefaultName {
 		t.Fatalf("instance name = %q, want %q", config.instance.Name, instance.DefaultName)
 	}
-	if config.listener.Network != server.DefaultListenerNetwork() {
-		t.Fatalf("listener network = %q, want %q", config.listener.Network, server.DefaultListenerNetwork())
+	if config.client.Network != server.DefaultListenerNetwork() {
+		t.Fatalf("client network = %q, want %q", config.client.Network, server.DefaultListenerNetwork())
 	}
-	if config.listener.Network == "unix" && config.listener.Address != config.instance.SocketPath {
-		t.Fatalf("listener address = %q, want %q", config.listener.Address, config.instance.SocketPath)
+	if config.client.Network == "unix" && config.client.Address != config.instance.SocketPath {
+		t.Fatalf("client address = %q, want %q", config.client.Address, config.instance.SocketPath)
 	}
 }
 
-func TestParseRuntimeConfigUsesEnvSelectedInstance(t *testing.T) {
+func TestParseRootConfigUsesEnvSelectedInstance(t *testing.T) {
 	t.Parallel()
 
-	config, err := parseRuntimeConfig(nil, io.Discard, func(key string) (string, bool) {
+	config, _, err := parseRootConfig([]string{"project", "list"}, io.Discard, func(key string) (string, bool) {
 		switch key {
 		case instance.EnvVar:
 			return "staging", true
@@ -45,21 +49,21 @@ func TestParseRuntimeConfigUsesEnvSelectedInstance(t *testing.T) {
 		}
 	}, nil)
 	if err != nil {
-		t.Fatalf("parseRuntimeConfig() error = %v", err)
+		t.Fatalf("parseRootConfig() error = %v", err)
 	}
 
 	if config.instance.Name != "staging" {
-		t.Fatalf("instance name = %q, want %q", config.instance.Name, "staging")
+		t.Fatalf("instance name = %q, want staging", config.instance.Name)
 	}
-	if config.listener.Address != config.instance.SocketPath {
-		t.Fatalf("listener address = %q, want %q", config.listener.Address, config.instance.SocketPath)
+	if config.client.Address != config.instance.SocketPath {
+		t.Fatalf("client address = %q, want %q", config.client.Address, config.instance.SocketPath)
 	}
 }
 
-func TestParseRuntimeConfigFlagOverridesEnv(t *testing.T) {
+func TestParseRootConfigFlagOverridesEnv(t *testing.T) {
 	t.Parallel()
 
-	config, err := parseRuntimeConfig([]string{"--instance", "dev"}, io.Discard, func(key string) (string, bool) {
+	config, _, err := parseRootConfig([]string{"--instance", "dev", "project", "list"}, io.Discard, func(key string) (string, bool) {
 		switch key {
 		case instance.EnvVar:
 			return "staging", true
@@ -70,57 +74,62 @@ func TestParseRuntimeConfigFlagOverridesEnv(t *testing.T) {
 		}
 	}, nil)
 	if err != nil {
-		t.Fatalf("parseRuntimeConfig() error = %v", err)
+		t.Fatalf("parseRootConfig() error = %v", err)
 	}
 
 	if config.instance.Name != "dev" {
-		t.Fatalf("instance name = %q, want %q", config.instance.Name, "dev")
+		t.Fatalf("instance name = %q, want dev", config.instance.Name)
 	}
 }
 
-func TestParseRuntimeConfigUsesTCPDefaultsWhenRequested(t *testing.T) {
+func TestParseRootConfigUsesTCPDefaultsWhenRequested(t *testing.T) {
 	t.Parallel()
 
-	config, err := parseRuntimeConfig([]string{"--grpc-network", "tcp"}, io.Discard, func(key string) (string, bool) {
+	config, _, err := parseRootConfig([]string{"--grpc-network", "tcp", "project", "list"}, io.Discard, func(key string) (string, bool) {
 		if key == "XDG_STATE_HOME" {
 			return "/state", true
 		}
 		return "", false
 	}, nil)
 	if err != nil {
-		t.Fatalf("parseRuntimeConfig() error = %v", err)
+		t.Fatalf("parseRootConfig() error = %v", err)
 	}
 
-	if config.listener.Network != "tcp" {
-		t.Fatalf("listener network = %q, want %q", config.listener.Network, "tcp")
+	if config.client.Network != "tcp" {
+		t.Fatalf("client network = %q, want tcp", config.client.Network)
 	}
-	if config.listener.Address != server.DefaultListenerAddress("tcp") {
-		t.Fatalf("listener address = %q, want %q", config.listener.Address, server.DefaultListenerAddress("tcp"))
+	if config.client.Address != server.DefaultListenerAddress("tcp") {
+		t.Fatalf("client address = %q, want %q", config.client.Address, server.DefaultListenerAddress("tcp"))
 	}
 }
 
-func TestParseRuntimeConfigHonorsExplicitAddress(t *testing.T) {
+func TestParseDaemonServeConfigHonorsExplicitAddress(t *testing.T) {
 	t.Parallel()
 
-	config, err := parseRuntimeConfig([]string{"--grpc-network", "unix", "--grpc-address", "/override.sock"}, io.Discard, func(key string) (string, bool) {
+	root, _, err := parseRootConfig([]string{"daemon", "serve"}, io.Discard, func(key string) (string, bool) {
 		if key == "XDG_STATE_HOME" {
 			return "/state", true
 		}
 		return "", false
 	}, nil)
 	if err != nil {
-		t.Fatalf("parseRuntimeConfig() error = %v", err)
+		t.Fatalf("parseRootConfig() error = %v", err)
+	}
+
+	config, err := parseDaemonServeConfig(root, []string{"--grpc-network", "unix", "--grpc-address", "/override.sock"}, io.Discard)
+	if err != nil {
+		t.Fatalf("parseDaemonServeConfig() error = %v", err)
 	}
 
 	if config.listener.Address != "/override.sock" {
-		t.Fatalf("listener address = %q, want %q", config.listener.Address, "/override.sock")
+		t.Fatalf("listener address = %q, want /override.sock", config.listener.Address)
 	}
 }
 
-func TestParseRuntimeConfigRejectsInvalidInstance(t *testing.T) {
+func TestParseRootConfigRejectsInvalidInstance(t *testing.T) {
 	t.Parallel()
 
-	_, err := parseRuntimeConfig(nil, io.Discard, func(key string) (string, bool) {
+	_, _, err := parseRootConfig([]string{"project", "list"}, io.Discard, func(key string) (string, bool) {
 		switch key {
 		case instance.EnvVar:
 			return "../oops", true
@@ -131,7 +140,7 @@ func TestParseRuntimeConfigRejectsInvalidInstance(t *testing.T) {
 		}
 	}, nil)
 	if err == nil {
-		t.Fatal("parseRuntimeConfig() error = nil, want non-nil")
+		t.Fatal("parseRootConfig() error = nil, want non-nil")
 	}
 }
 
@@ -151,5 +160,30 @@ func TestParseErrorExitCodeHandlesHelpAndDiagnostics(t *testing.T) {
 	}
 	if stderr.Len() == 0 {
 		t.Fatal("stderr = empty, want diagnostic output")
+	}
+}
+
+func TestAppCommandHelpUsesProtoComments(t *testing.T) {
+	t.Parallel()
+
+	var stdout, stderr bytes.Buffer
+	app := newApp(&stdout, &stderr, func(string) (string, bool) { return "", false }, func() (string, error) {
+		return "/Users/tester", nil
+	})
+
+	err := app.run([]string{"project", "list", "--help"})
+	if err != flag.ErrHelp {
+		t.Fatalf("run() error = %v, want %v", err, flag.ErrHelp)
+	}
+
+	output := stderr.String()
+	for _, want := range []string{
+		"List projects stored in the daemon.",
+		"--status enum",
+		"Filter projects by status.",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("help output missing %q\n%s", want, output)
+		}
 	}
 }

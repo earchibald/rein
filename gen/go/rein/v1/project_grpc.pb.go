@@ -28,10 +28,16 @@ const (
 // ProjectServiceClient is the client API for ProjectService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// ProjectService manages projects stored by the daemon.
 type ProjectServiceClient interface {
+	// List projects stored in the daemon.
 	ListProjects(ctx context.Context, in *ListProjectsRequest, opts ...grpc.CallOption) (*ListProjectsResponse, error)
+	// Get a single project by id.
 	GetProject(ctx context.Context, in *GetProjectRequest, opts ...grpc.CallOption) (*GetProjectResponse, error)
+	// Create a project record.
 	CreateProject(ctx context.Context, in *CreateProjectRequest, opts ...grpc.CallOption) (*CreateProjectResponse, error)
+	// Update a project record.
 	UpdateProject(ctx context.Context, in *UpdateProjectRequest, opts ...grpc.CallOption) (*UpdateProjectResponse, error)
 }
 
@@ -86,10 +92,16 @@ func (c *projectServiceClient) UpdateProject(ctx context.Context, in *UpdateProj
 // ProjectServiceServer is the server API for ProjectService service.
 // All implementations should embed UnimplementedProjectServiceServer
 // for forward compatibility.
+//
+// ProjectService manages projects stored by the daemon.
 type ProjectServiceServer interface {
+	// List projects stored in the daemon.
 	ListProjects(context.Context, *ListProjectsRequest) (*ListProjectsResponse, error)
+	// Get a single project by id.
 	GetProject(context.Context, *GetProjectRequest) (*GetProjectResponse, error)
+	// Create a project record.
 	CreateProject(context.Context, *CreateProjectRequest) (*CreateProjectResponse, error)
+	// Update a project record.
 	UpdateProject(context.Context, *UpdateProjectRequest) (*UpdateProjectResponse, error)
 }
 

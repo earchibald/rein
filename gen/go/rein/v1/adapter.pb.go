@@ -22,10 +22,13 @@ const (
 )
 
 type ListAdaptersRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Page          *PageRequest           `protobuf:"bytes,1,opt,name=page,proto3" json:"page,omitempty"`
-	Category      AdapterCategory        `protobuf:"varint,2,opt,name=category,proto3,enum=rein.v1.AdapterCategory" json:"category,omitempty"`
-	EnabledOnly   bool                   `protobuf:"varint,3,opt,name=enabled_only,json=enabledOnly,proto3" json:"enabled_only,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Paginate adapter results. Pass JSON matching PageRequest.
+	Page *PageRequest `protobuf:"bytes,1,opt,name=page,proto3" json:"page,omitempty"`
+	// Filter adapters by category.
+	Category AdapterCategory `protobuf:"varint,2,opt,name=category,proto3,enum=rein.v1.AdapterCategory" json:"category,omitempty"`
+	// Exclude disabled adapters when true.
+	EnabledOnly   bool `protobuf:"varint,3,opt,name=enabled_only,json=enabledOnly,proto3" json:"enabled_only,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -134,8 +137,9 @@ func (x *ListAdaptersResponse) GetPage() *PageResponse {
 }
 
 type GetAdapterRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Adapter identifier.
+	Id            string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -222,8 +226,9 @@ func (x *GetAdapterResponse) GetAdapter() *Adapter {
 }
 
 type ValidateAdapterRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Adapter       *Adapter               `protobuf:"bytes,1,opt,name=adapter,proto3" json:"adapter,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Adapter payload. Pass JSON matching Adapter.
+	Adapter       *Adapter `protobuf:"bytes,1,opt,name=adapter,proto3" json:"adapter,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
