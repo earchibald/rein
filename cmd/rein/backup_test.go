@@ -121,7 +121,10 @@ func TestBackupStopStopsDaemonBeforeCopy(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	cmd := exec.Command(os.Args[0], "-test.run=TestBackupHelperProcess")
+	helperCtx, cancelHelper := context.WithCancel(context.Background())
+	defer cancelHelper()
+
+	cmd := exec.CommandContext(helperCtx, os.Args[0], "-test.run=TestBackupHelperProcess")
 	cmd.Env = append(os.Environ(),
 		"REIN_TEST_PID_HELPER=1",
 		"REIN_TEST_PID_PATH="+layout.PIDPath,

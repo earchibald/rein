@@ -3,6 +3,7 @@
 
 buf := "go run github.com/bufbuild/buf/cmd/buf@v1.59.0"
 gotestsum := "go run gotest.tools/gotestsum@v1.10.0"
+golangci_lint := "go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.1"
 
 default:
     @just --list
@@ -32,7 +33,7 @@ test-cover:
 
 # Run golangci-lint
 lint:
-    golangci-lint run ./...
+    {{golangci_lint}} run ./...
 
 # Run go vet
 vet:
@@ -57,5 +58,5 @@ ci: build vet lint test-race
 # Install development tools
 install-tools:
     go install gotest.tools/gotestsum@v1.10.0
-    go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+    go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.1
     go install golang.org/x/tools/cmd/goimports@latest

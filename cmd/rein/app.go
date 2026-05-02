@@ -24,8 +24,8 @@ import (
 	"google.golang.org/protobuf/types/dynamicpb"
 
 	"github.com/earchibald/rein/internal/adapter"
-	"github.com/earchibald/rein/internal/instance"
 	"github.com/earchibald/rein/internal/dashboards"
+	"github.com/earchibald/rein/internal/instance"
 	"github.com/earchibald/rein/internal/server"
 	"github.com/earchibald/rein/internal/service"
 	"github.com/earchibald/rein/internal/storage/sqlite"
