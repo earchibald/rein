@@ -37,6 +37,8 @@ func TestMigrateUpAndDown(t *testing.T) {
 		"tasksteps",
 		"sideeffects",
 		"costevents",
+		"costeventlog",
+		"budgetstates",
 		"settings",
 		"featureflags",
 	} {
@@ -64,6 +66,8 @@ func TestMigrateUpAndDown(t *testing.T) {
 		"tasksteps",
 		"sideeffects",
 		"costevents",
+		"costeventlog",
+		"budgetstates",
 		"settings",
 		"featureflags",
 	} {
@@ -79,7 +83,7 @@ func TestMigrateDownStepsRejectsInvalidStepCount(t *testing.T) {
 	}
 }
 
-func TestMigrateDownStepsDropsSchema(t *testing.T) {
+func TestMigrateDownStepsDropsLatestMigration(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -94,7 +98,9 @@ func TestMigrateDownStepsDropsSchema(t *testing.T) {
 		t.Fatalf("MigrateDownSteps() error = %v", err)
 	}
 
-	assertTableExists(t, store.DB(), "projects", false)
+	assertTableExists(t, store.DB(), "projects", true)
+	assertTableExists(t, store.DB(), "costeventlog", false)
+	assertTableExists(t, store.DB(), "budgetstates", false)
 
 	if err := store.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
