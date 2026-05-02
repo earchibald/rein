@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package rein.v1;
+
+option go_package = "github.com/earchibald/rein/gen/go/rein/v1;reinv1";
+
+import "rein/v1/types.proto";
+
+service ExecutionService {
+  rpc ListExecutions(ListExecutionsRequest) returns (ListExecutionsResponse);
+  rpc GetExecution(GetExecutionRequest) returns (GetExecutionResponse);
+  rpc StartExecution(StartExecutionRequest) returns (StartExecutionResponse);
+  rpc CancelExecution(CancelExecutionRequest) returns (CancelExecutionResponse);
+}
+
+message ListExecutionsRequest {
+  PageRequest page = 1;
+  string issue_id = 2;
+  ExecutionStatus status = 3;
+}
+
+message ListExecutionsResponse {
+  repeated Execution executions = 1;
+  PageResponse page = 2;
+}
+
+message GetExecutionRequest {
+  string id = 1;
+}
+
+message GetExecutionResponse {
+  Execution execution = 1;
+}
+
+message StartExecutionRequest {
+  string issue_id = 1;
+  string workflow_id = 2;
+  string requested_by = 3;
+  map<string, string> inputs = 4;
+}
+
+message StartExecutionResponse {
+  Execution execution = 1;
+}
+
+message CancelExecutionRequest {
+  string id = 1;
+  string reason = 2;
+}
+
+message CancelExecutionResponse {
+  Execution execution = 1;
+}

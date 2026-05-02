@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package rein.v1;
+
+option go_package = "github.com/earchibald/rein/gen/go/rein/v1;reinv1";
+
+import "rein/v1/types.proto";
+
+service AdapterService {
+  rpc ListAdapters(ListAdaptersRequest) returns (ListAdaptersResponse);
+  rpc GetAdapter(GetAdapterRequest) returns (GetAdapterResponse);
+  rpc ValidateAdapter(ValidateAdapterRequest) returns (ValidateAdapterResponse);
+}
+
+message ListAdaptersRequest {
+  PageRequest page = 1;
+  AdapterCategory category = 2;
+  bool enabled_only = 3;
+}
+
+message ListAdaptersResponse {
+  repeated Adapter adapters = 1;
+  PageResponse page = 2;
+}
+
+message GetAdapterRequest {
+  string id = 1;
+}
+
+message GetAdapterResponse {
+  Adapter adapter = 1;
+}
+
+message ValidateAdapterRequest {
+  Adapter adapter = 1;
+}
+
+message ValidateAdapterResponse {
+  bool valid = 1;
+  repeated ValidationMessage messages = 2;
+}

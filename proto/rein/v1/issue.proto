@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package rein.v1;
+
+option go_package = "github.com/earchibald/rein/gen/go/rein/v1;reinv1";
+
+import "rein/v1/types.proto";
+
+service IssueService {
+  rpc ListIssues(ListIssuesRequest) returns (ListIssuesResponse);
+  rpc GetIssue(GetIssueRequest) returns (GetIssueResponse);
+  rpc CreateIssue(CreateIssueRequest) returns (CreateIssueResponse);
+  rpc UpdateIssue(UpdateIssueRequest) returns (UpdateIssueResponse);
+}
+
+message ListIssuesRequest {
+  PageRequest page = 1;
+  string project_id = 2;
+  IssueStatus status = 3;
+  string assignee = 4;
+  string query = 5;
+}
+
+message ListIssuesResponse {
+  repeated Issue issues = 1;
+  PageResponse page = 2;
+}
+
+message GetIssueRequest {
+  string id = 1;
+}
+
+message GetIssueResponse {
+  Issue issue = 1;
+}
+
+message CreateIssueRequest {
+  Issue issue = 1;
+}
+
+message CreateIssueResponse {
+  Issue issue = 1;
+}
+
+message UpdateIssueRequest {
+  Issue issue = 1;
+}
+
+message UpdateIssueResponse {
+  Issue issue = 1;
+}

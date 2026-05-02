@@ -1,8 +1,16 @@
 # rein — project work-surface
 # Run `just` or `just --list` to see available recipes.
 
+buf := "go run github.com/bufbuild/buf/cmd/buf@v1.59.0"
+
 default:
     @just --list
+
+# Lint and generate protobuf/gRPC code
+proto:
+    rm -rf gen/go
+    {{buf}} lint
+    {{buf}} generate
 
 # Build the rein binary
 build:

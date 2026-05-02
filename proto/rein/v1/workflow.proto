@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package rein.v1;
+
+option go_package = "github.com/earchibald/rein/gen/go/rein/v1;reinv1";
+
+import "rein/v1/types.proto";
+
+service WorkflowService {
+  rpc ListWorkflows(ListWorkflowsRequest) returns (ListWorkflowsResponse);
+  rpc GetWorkflow(GetWorkflowRequest) returns (GetWorkflowResponse);
+  rpc ValidateWorkflow(ValidateWorkflowRequest) returns (ValidateWorkflowResponse);
+}
+
+message ListWorkflowsRequest {
+  PageRequest page = 1;
+  string query = 2;
+}
+
+message ListWorkflowsResponse {
+  repeated Workflow workflows = 1;
+  PageResponse page = 2;
+}
+
+message GetWorkflowRequest {
+  string id = 1;
+}
+
+message GetWorkflowResponse {
+  Workflow workflow = 1;
+}
+
+message ValidateWorkflowRequest {
+  Workflow workflow = 1;
+}
+
+message ValidateWorkflowResponse {
+  bool valid = 1;
+  repeated ValidationMessage messages = 2;
+}

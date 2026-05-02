@@ -1,0 +1,135 @@
+syntax = "proto3";
+
+package rein.v1;
+
+option go_package = "github.com/earchibald/rein/gen/go/rein/v1;reinv1";
+
+import "google/protobuf/timestamp.proto";
+
+message PageRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+}
+
+message PageResponse {
+  string next_page_token = 1;
+}
+
+enum ProjectStatus {
+  PROJECT_STATUS_UNSPECIFIED = 0;
+  PROJECT_STATUS_ACTIVE = 1;
+  PROJECT_STATUS_ARCHIVED = 2;
+}
+
+enum IssueStatus {
+  ISSUE_STATUS_UNSPECIFIED = 0;
+  ISSUE_STATUS_OPEN = 1;
+  ISSUE_STATUS_IN_PROGRESS = 2;
+  ISSUE_STATUS_BLOCKED = 3;
+  ISSUE_STATUS_RESOLVED = 4;
+  ISSUE_STATUS_CANCELED = 5;
+}
+
+enum IssuePriority {
+  ISSUE_PRIORITY_UNSPECIFIED = 0;
+  ISSUE_PRIORITY_LOW = 1;
+  ISSUE_PRIORITY_MEDIUM = 2;
+  ISSUE_PRIORITY_HIGH = 3;
+}
+
+enum ExecutionStatus {
+  EXECUTION_STATUS_UNSPECIFIED = 0;
+  EXECUTION_STATUS_QUEUED = 1;
+  EXECUTION_STATUS_RUNNING = 2;
+  EXECUTION_STATUS_SUCCEEDED = 3;
+  EXECUTION_STATUS_FAILED = 4;
+  EXECUTION_STATUS_CANCELED = 5;
+}
+
+enum AdapterCategory {
+  ADAPTER_CATEGORY_UNSPECIFIED = 0;
+  ADAPTER_CATEGORY_CODING_AGENT = 1;
+  ADAPTER_CATEGORY_REVIEW_AGENT = 2;
+  ADAPTER_CATEGORY_TRACKER = 3;
+  ADAPTER_CATEGORY_NOTIFICATION = 4;
+  ADAPTER_CATEGORY_MULTIPLEXER = 5;
+}
+
+message Project {
+  string id = 1;
+  string slug = 2;
+  string display_name = 3;
+  string summary = 4;
+  ProjectStatus status = 5;
+  google.protobuf.Timestamp created_time = 6;
+  google.protobuf.Timestamp updated_time = 7;
+  map<string, string> labels = 8;
+}
+
+message Issue {
+  string id = 1;
+  string project_id = 2;
+  string title = 3;
+  string summary = 4;
+  IssueStatus status = 5;
+  IssuePriority priority = 6;
+  string workflow_id = 7;
+  string assignee = 8;
+  google.protobuf.Timestamp created_time = 9;
+  google.protobuf.Timestamp updated_time = 10;
+  map<string, string> labels = 11;
+}
+
+message Execution {
+  string id = 1;
+  string issue_id = 2;
+  string workflow_id = 3;
+  string adapter_id = 4;
+  ExecutionStatus status = 5;
+  string requested_by = 6;
+  google.protobuf.Timestamp created_time = 7;
+  google.protobuf.Timestamp started_time = 8;
+  google.protobuf.Timestamp finished_time = 9;
+  map<string, string> metadata = 10;
+}
+
+message Workflow {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  string version = 4;
+  repeated WorkflowStep steps = 5;
+  google.protobuf.Timestamp created_time = 6;
+  google.protobuf.Timestamp updated_time = 7;
+}
+
+message WorkflowStep {
+  string id = 1;
+  string name = 2;
+  string adapter_id = 3;
+  repeated string depends_on = 4;
+  map<string, string> inputs = 5;
+}
+
+message Adapter {
+  string id = 1;
+  string name = 2;
+  AdapterCategory category = 3;
+  string description = 4;
+  string version = 5;
+  bool enabled = 6;
+  map<string, string> capabilities = 7;
+}
+
+message ValidationMessage {
+  enum Severity {
+    SEVERITY_UNSPECIFIED = 0;
+    SEVERITY_INFO = 1;
+    SEVERITY_WARNING = 2;
+    SEVERITY_ERROR = 3;
+  }
+
+  Severity severity = 1;
+  string field = 2;
+  string message = 3;
+}
