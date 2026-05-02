@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"google.golang.org/grpc/codes"
@@ -18,7 +19,12 @@ type AdapterServer struct {
 }
 
 func NewAdapterServerFromRoot(root string, options adapter.DiscoveryOptions) (*AdapterServer, error) {
-	registry, err := adapter.Load(root, options)
+	resolvedRoot, err := adapter.FindRoot(root)
+	if err != nil {
+		err = fmt.Errorf("discover adapter marketplace root: %w", err)
+		return &AdapterServer{loadErr: err}, err
+	}
+	registry, err := adapter.Load(resolvedRoot, options)
 	server := &AdapterServer{
 		registry: registry,
 		loadErr:  err,

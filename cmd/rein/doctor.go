@@ -75,7 +75,9 @@ type doctorRPCDiagnostic struct {
 }
 
 type doctorPluginDiagnostic struct {
-	Root             string                      `json:"root"`
+	Start            string                      `json:"start"`
+	Root             string                      `json:"root,omitempty"`
+	RootFound        bool                        `json:"rootFound"`
 	DaemonAPIVersion string                      `json:"daemonApiVersion"`
 	RegistryReady    bool                        `json:"registryReady"`
 	AvailableCount   int                         `json:"availableCount"`
@@ -278,7 +280,7 @@ func diagnoseSocket(path string) doctorSocketDiagnostic {
 }
 
 func diagnosePlugins(root string) doctorPluginDiagnostic {
-	diagnostic := adapter.Diagnose(root, adapter.LocalDiscoveryOptions())
+	diagnostic := adapter.DiagnoseFromWorkingDir(root, adapter.LocalDiscoveryOptions())
 
 	adapters := make([]doctorAdapterDiagnostic, 0, len(diagnostic.Adapters))
 	availableCount := 0
@@ -300,7 +302,9 @@ func diagnosePlugins(root string) doctorPluginDiagnostic {
 	}
 
 	return doctorPluginDiagnostic{
-		Root:             root,
+		Start:            diagnostic.Start,
+		Root:             diagnostic.Root,
+		RootFound:        diagnostic.RootFound,
 		DaemonAPIVersion: adapter.CurrentDaemonAPIVersion,
 		RegistryReady:    diagnostic.RegistryReady,
 		AvailableCount:   availableCount,

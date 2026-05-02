@@ -15,11 +15,15 @@ import (
 )
 
 func NewManagedCatalogFromRoot(root string, options adapter.DiscoveryOptions) (ManagedCatalog, error) {
-	registry, err := adapter.Load(root, options)
+	resolvedRoot, err := adapter.FindRoot(root)
+	if err != nil {
+		return nil, fmt.Errorf("discover adapter marketplace root: %w", err)
+	}
+	registry, err := adapter.Load(resolvedRoot, options)
 	if err != nil {
 		return nil, err
 	}
-	return newManagedCatalog(root, registry), nil
+	return newManagedCatalog(resolvedRoot, registry), nil
 }
 
 func NewManagedCatalog(registry *adapter.Registry) ManagedCatalog {

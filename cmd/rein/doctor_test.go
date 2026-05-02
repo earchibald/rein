@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -88,6 +89,7 @@ func TestDoctorCommandEmitsStructuredJSON(t *testing.T) {
 	}
 
 	var payload struct {
+		OK       bool `json:"ok"`
 		Instance struct {
 			Name    string `json:"name"`
 			PIDPath string `json:"pidPath"`
@@ -104,7 +106,12 @@ func TestDoctorCommandEmitsStructuredJSON(t *testing.T) {
 			} `json:"rpc"`
 		} `json:"daemon"`
 		Plugins struct {
-			Marketplace struct {
+			Start         string `json:"start"`
+			Root          string `json:"root"`
+			RootFound     bool   `json:"rootFound"`
+			RegistryReady bool   `json:"registryReady"`
+			Error         string `json:"error"`
+			Marketplace   struct {
 				Present bool `json:"present"`
 			} `json:"marketplace"`
 			ConfiguredCount int `json:"configuredCount"`
@@ -139,6 +146,21 @@ func TestDoctorCommandEmitsStructuredJSON(t *testing.T) {
 	if !payload.Daemon.Reachable || !payload.Daemon.RPC.OK {
 		t.Fatalf("daemon diagnostic = %+v, want reachable rpc ok", payload.Daemon)
 	}
+	if payload.OK {
+		t.Fatalf("ok = true, want false when plugin marketplace discovery is missing")
+	}
+	if payload.Plugins.Start != worktree {
+		t.Fatalf("plugins.start = %q, want %q", payload.Plugins.Start, worktree)
+	}
+	if payload.Plugins.RootFound {
+		t.Fatalf("plugins.rootFound = true, want false")
+	}
+	if payload.Plugins.RegistryReady {
+		t.Fatalf("plugins.registryReady = true, want false")
+	}
+	if payload.Plugins.Error == "" {
+		t.Fatal("plugins.error = empty, want missing marketplace message")
+	}
 	if payload.Plugins.Marketplace.Present {
 		t.Fatalf("marketplace.present = true, want false")
 	}
@@ -151,4 +173,69 @@ func TestDoctorCommandEmitsStructuredJSON(t *testing.T) {
 	if !payload.Storage.Migrations.Ready || payload.Storage.Migrations.CurrentVersion == 0 || payload.Storage.Migrations.LatestVersion == 0 {
 		t.Fatalf("migration diagnostic = %+v, want ready migrated database", payload.Storage.Migrations)
 	}
+}
+
+func TestDiagnosePluginsDiscoversMarketplaceFromSubdirectory(t *testing.T) {
+	t.Parallel()
+
+	root := writeDoctorPluginFixture(t)
+	start := filepath.Join(root, "nested", "deeper")
+	if err := os.MkdirAll(start, 0o755); err != nil {
+		t.Fatalf("MkdirAll(start) error = %v", err)
+	}
+
+	diagnostic := diagnosePlugins(start)
+	if diagnostic.Start != start {
+		t.Fatalf("diagnosePlugins().Start = %q, want %q", diagnostic.Start, start)
+	}
+	if !diagnostic.RootFound {
+		t.Fatalf("diagnosePlugins().RootFound = false, want true: %+v", diagnostic)
+	}
+	if diagnostic.Root != root {
+		t.Fatalf("diagnosePlugins().Root = %q, want %q", diagnostic.Root, root)
+	}
+	if !diagnostic.RegistryReady {
+		t.Fatalf("diagnosePlugins().RegistryReady = false, want true: %+v", diagnostic)
+	}
+	if !diagnostic.Marketplace.Present {
+		t.Fatalf("diagnosePlugins().Marketplace.Present = false, want true: %+v", diagnostic)
+	}
+	if diagnostic.ConfiguredCount != 1 || diagnostic.AvailableCount != 1 {
+		t.Fatalf("diagnosePlugins() counts = configured %d available %d, want 1/1", diagnostic.ConfiguredCount, diagnostic.AvailableCount)
+	}
+}
+
+func writeDoctorPluginFixture(t *testing.T) string {
+	t.Helper()
+
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".claude-plugin"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(.claude-plugin) error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "plugins", "messaging-local", ".claude-plugin"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(plugin manifest dir) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".claude-plugin", "marketplace.json"), []byte(`{
+  "name": "doctor-fixture",
+  "plugins": [
+    {
+      "name": "messaging-local",
+      "source": "./plugins/messaging-local",
+      "version": "0.1.0",
+      "category": "messaging",
+      "daemonApiVersion": "rein.v1"
+    }
+  ]
+}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(marketplace.json) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "plugins", "messaging-local", ".claude-plugin", "plugin.json"), []byte(`{
+  "name": "messaging-local",
+  "version": "0.1.0",
+  "category": "messaging",
+  "daemonApiVersion": "rein.v1"
+}`), 0o644); err != nil {
+		t.Fatalf("WriteFile(plugin.json) error = %v", err)
+	}
+	return root
 }

@@ -7,7 +7,7 @@ Rein is still early, but the current tree already ships a usable local daemon, a
 
 - A single `rein` binary that can run the daemon, speak the canonical gRPC/CLI surface, and launch the TUI.
 - Per-instance state under `~/.local/state/rein/instances/<name>/` (or `$XDG_STATE_HOME/rein/instances/<name>/`) with `rein backup` and `rein restore` for safe copies.
-- `rein doctor` JSON diagnostics for instance layout, daemon reachability, adapter registry readiness, credential-provider readiness, and SQLite migration state.
+- `rein doctor` JSON diagnostics for instance layout, daemon reachability, repo-local adapter marketplace discovery/readiness, credential-provider readiness, and SQLite migration state.
 - Opt-in OTLP/gRPC export for traces, metrics, and logs, plus a bundled `rein dashboards apply` workflow for SigNoz.
 - A signed repository marketplace index plus bundled first-party plugins under `plugins/`.
 - External seams for one-shot migration tooling and external coding adapters, without pulling those source-system dependencies into the core daemon.
@@ -20,13 +20,13 @@ Build the current tree with Go 1.25:
 go build -o bin/rein ./cmd/rein
 ```
 
-Start the daemon for the default `live` instance:
+Start the daemon for the default `live` instance from the repo root (or any child directory inside this repo so bundled adapters are discovered consistently):
 
 ```bash
 ./bin/rein daemon serve
 ```
 
-In another terminal, inspect health and the current API surface:
+In another terminal, inspect health and the current API surface from that same checkout (doctor reports repo-local marketplace discovery explicitly when you are outside a repo checkout):
 
 ```bash
 ./bin/rein doctor
@@ -107,10 +107,10 @@ mdbook serve docs
 ## CLI surface
 
 - `rein` is the canonical gRPC client CLI. By default it connects to the selected instance over that instance's unix socket.
-- Use `rein daemon serve` to start the daemon for the selected instance.
+- Use `rein daemon serve` to start the daemon for the selected instance; when you run from a rein checkout, the bundled adapter marketplace is discovered from the repo root even in child directories.
 - Use `rein backup <destination>` to checkpoint and copy the selected instance state directory.
 - Use `rein restore <source>` to swap the selected instance state directory back from a backup copy.
-- Use `rein doctor` to inspect the selected instance and emit machine-parseable JSON readiness diagnostics.
+- Use `rein doctor` to inspect the selected instance and emit machine-parseable JSON readiness diagnostics, including whether repo-local adapter marketplace discovery succeeded.
 - Use `rein dashboards apply` to push the bundled `rein-dashboards` SigNoz reference dashboards into a SigNoz workspace over the HTTP API.
 - Use `rein describe-as=cli` for a manual-style, machine-consumable description of the CLI/gRPC surface, service-group help, utility commands, and reachable protobuf schemas.
 - Use `rein describe-as=mcp` for a compact stable YAML description of commands, help entry points, gateway stub routes, and a schema index suitable for wrapper/skill tooling.
@@ -126,7 +126,7 @@ mdbook serve docs
 
 ## Adapter registry
 
-- The repo ships a signed marketplace index at `.claude-plugin/marketplace.json` for built-in and remote adapter discovery.
+- The repo ships a signed marketplace index at `.claude-plugin/marketplace.json` for built-in and remote adapter discovery, and repo-local commands walk upward so child directories resolve the same checkout root.
 - Repository-local trusted public keys live at `.claude-plugin/trusted-keys.json`; `rein doctor` reports signature presence and verification status.
 - The daemon's local discovery path tolerates unsigned marketplace indexes for local development, but the committed repository index should remain signed.
 - `messaging-null` is a no-op notification adapter that advertises `messaging.post` so workflows can stay launchable until Slack and Discord adapters land.

@@ -8,7 +8,9 @@ import (
 )
 
 type Diagnostic struct {
+	Start            string
 	Root             string
+	RootFound        bool
 	MarketplacePath  string
 	MarketplaceName  string
 	MarketplaceFound bool
@@ -40,9 +42,10 @@ type AdapterDiagnostic struct {
 
 func Diagnose(root string, options DiscoveryOptions) Diagnostic {
 	diagnostic := Diagnostic{
-		Root:            root,
-		MarketplacePath: filepath.Join(root, ".claude-plugin", "marketplace.json"),
-		RegistryReady:   true,
+		Start:         root,
+		Root:          root,
+		RootFound:     true,
+		RegistryReady: true,
 	}
 
 	var err error
@@ -53,13 +56,11 @@ func Diagnose(root string, options DiscoveryOptions) Diagnostic {
 		return diagnostic
 	}
 
-	raw, err := os.ReadFile(diagnostic.MarketplacePath)
+	raw, marketplacePath, err := readMarketplaceIndex(root)
+	diagnostic.MarketplacePath = marketplacePath
 	if err != nil {
-		if os.IsNotExist(err) {
-			return diagnostic
-		}
 		diagnostic.RegistryReady = false
-		diagnostic.Error = fmt.Sprintf("read marketplace index: %v", err)
+		diagnostic.Error = err.Error()
 		return diagnostic
 	}
 	diagnostic.MarketplaceFound = true
@@ -89,6 +90,24 @@ func Diagnose(root string, options DiscoveryOptions) Diagnostic {
 		diagnostic.Adapters = append(diagnostic.Adapters, adapterDiagnostic)
 	}
 
+	return diagnostic
+}
+
+func DiagnoseFromWorkingDir(start string, options DiscoveryOptions) Diagnostic {
+	root, err := FindRoot(start)
+	if err != nil {
+		return Diagnostic{
+			Start:           start,
+			MarketplacePath: filepath.Join(start, MarketplaceIndexPath),
+			RegistryReady:   false,
+			Error:           err.Error(),
+		}
+	}
+
+	diagnostic := Diagnose(root, options)
+	diagnostic.Start = start
+	diagnostic.Root = root
+	diagnostic.RootFound = true
 	return diagnostic
 }
 
