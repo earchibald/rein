@@ -84,7 +84,7 @@ Prefer the CLI when you need:
 
 - machine-readable JSON output
 - precise filters or scripted automation
-- `describe-as=cli` / `describe-as=mcp`
+- `describe-as=cli` / `describe-as=mcp` / `describe-as=mcp-full`
 - backup/restore operations
 - SigNoz dashboard installation
 

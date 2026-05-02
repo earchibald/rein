@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 
@@ -15,22 +16,25 @@ import (
 )
 
 const (
-	describeFormatCLI = "cli"
-	describeFormatMCP = "mcp"
+	describeFormatCLI     = "cli"
+	describeFormatMCP     = "mcp"
+	describeFormatMCPFull = "mcp-full"
 )
 
 type describeSurface struct {
-	Title       string
-	Summary     string
-	Conventions []string
-	Usage       []string
-	Formats     []describeFormatDescription
-	GlobalFlags []staticFlagDescription
-	Commands    []commandDescription
-	Daemon      daemonCommandDescription
-	Gateway     gatewayDescription
-	Messages    []messageSchemaDescription
-	Enums       []enumSchemaDescription
+	Title           string
+	Summary         string
+	Conventions     []string
+	Usage           []string
+	Formats         []describeFormatDescription
+	GlobalFlags     []staticFlagDescription
+	Services        []serviceGroupDescription
+	Commands        []commandDescription
+	UtilityCommands []utilityCommandDescription
+	Gateway         gatewayDescription
+	SchemaIndex     schemaIndexDescription
+	Messages        []messageSchemaDescription
+	Enums           []enumSchemaDescription
 }
 
 type describeFormatDescription struct {
@@ -44,11 +48,34 @@ type staticFlagDescription struct {
 	Description string
 }
 
-type daemonCommandDescription struct {
+type staticArgumentDescription struct {
+	Name        string
+	Type        string
+	Description string
+	Required    bool
+}
+
+type serviceGroupDescription struct {
+	Name    string
+	CLI     string
+	HelpCLI string
+	Summary string
+	Verbs   []serviceVerbDescription
+}
+
+type serviceVerbDescription struct {
 	Name    string
 	CLI     string
 	Summary string
-	Flags   []staticFlagDescription
+}
+
+type utilityCommandDescription struct {
+	Name      string
+	Command   string
+	CLI       string
+	Summary   string
+	Flags     []staticFlagDescription
+	Arguments []staticArgumentDescription
 }
 
 type commandDescription struct {
@@ -83,6 +110,20 @@ type gatewayDescription struct {
 	Streams []gateway.Stream
 }
 
+type schemaIndexDescription struct {
+	DetailFormat  string
+	DetailCommand string
+	MessageCount  int
+	EnumCount     int
+	Messages      []namedSchemaDescription
+	Enums         []namedSchemaDescription
+}
+
+type namedSchemaDescription struct {
+	Name        string
+	Description string
+}
+
 type messageSchemaDescription struct {
 	Name        string
 	Description string
@@ -101,10 +142,21 @@ type enumValueDescription struct {
 	Description string
 }
 
+var (
+	compactDescribeSurfaceOnce sync.Once
+	compactDescribeSurface     describeSurface
+	compactDescribeSurfaceErr  error
+
+	fullDescribeSurfaceOnce sync.Once
+	fullDescribeSurface     describeSurface
+	fullDescribeSurfaceErr  error
+)
+
 func supportedDescribeFormats() []describeFormatDescription {
 	return []describeFormatDescription{
-		{Name: describeFormatCLI, Description: "Manual-style description of the descriptor-driven CLI, daemon command, and reachable protobuf schemas."},
-		{Name: describeFormatMCP, Description: "YAML reference for wrapper and skill tooling, including CLI commands, gateway stub routes, and protobuf schemas."},
+		{Name: describeFormatCLI, Description: "Manual-style description of RPC service groups, top-level utility commands, gateway routes, and reachable protobuf schemas."},
+		{Name: describeFormatMCP, Description: "Compact YAML reference for wrapper and skill tooling with command/help discovery, gateway routes, and a schema index. Use mcp-full for the exhaustive schema dump."},
+		{Name: describeFormatMCPFull, Description: "Exhaustive YAML surface including the detailed protobuf schema dump used by cli."},
 	}
 }
 
@@ -114,8 +166,11 @@ func rootUsageLines() []string {
 		"rein [global flags] backup [flags] <destination>",
 		"rein [global flags] daemon serve [flags]",
 		"rein dashboards apply [flags]",
+		"rein [global flags] doctor",
 		"rein [global flags] describe-as=<format>",
 		"rein [global flags] restore [flags] <source>",
+		"rein [global flags] tui",
+		"rein version [--json]",
 	}
 }
 
@@ -124,6 +179,7 @@ func rootConventions() []string {
 		"Request flags map 1:1 to top-level gRPC request fields.",
 		"Scalar fields take plain values; message, repeated, and map fields take JSON blobs.",
 		"Responses are emitted as JSON using protobuf field names.",
+		"Use 'rein <service> --help' for subgroup help and 'rein <service> <verb> --help' for command flags.",
 	}
 }
 
@@ -147,7 +203,113 @@ func daemonServeFlagDescriptions() []staticFlagDescription {
 	}
 }
 
-func buildDescribeSurface() (describeSurface, error) {
+func utilityCommandDescriptions() []utilityCommandDescription {
+	return []utilityCommandDescription{
+		{
+			Name:    "backup",
+			Command: "backup",
+			CLI:     "rein [global flags] backup [flags] <destination>",
+			Summary: "Checkpoint SQLite WAL and atomically copy the selected instance state.",
+			Flags: []staticFlagDescription{{
+				Name:        "stop",
+				Type:        "bool",
+				Description: "Stop the selected daemon first as a paranoid fallback.",
+			}},
+			Arguments: []staticArgumentDescription{{
+				Name:        "destination",
+				Type:        "path",
+				Description: "Destination directory that must not already exist.",
+				Required:    true,
+			}},
+		},
+		{
+			Name:    "daemon_serve",
+			Command: "daemon serve",
+			CLI:     "rein [global flags] daemon serve [flags]",
+			Summary: "Start the daemon and expose the canonical gRPC surface.",
+			Flags:   daemonServeFlagDescriptions(),
+		},
+		{
+			Name:    "dashboards_apply",
+			Command: "dashboards apply",
+			CLI:     "rein dashboards apply [flags]",
+			Summary: "Apply reference OTLP dashboards to a SigNoz workspace.",
+			Flags: []staticFlagDescription{
+				{Name: "plugin", Type: "string", Description: "Dashboards plugin name (default \"rein-dashboards\")."},
+				{Name: "signoz-url", Type: "string", Description: "SigNoz base URL (or SIGNOZ_BASE_URL / SIGNOZ_URL)."},
+				{Name: "signoz-api-key", Type: "string", Description: "SigNoz API key (or SIGNOZ_API_KEY)."},
+			},
+		},
+		{
+			Name:    "doctor",
+			Command: "doctor",
+			CLI:     "rein [global flags] doctor",
+			Summary: "Emit JSON diagnostics for daemon health and local instance readiness.",
+		},
+		{
+			Name:    "describe_as",
+			Command: "describe-as",
+			CLI:     "rein [global flags] describe-as=<format>",
+			Summary: "Emit a stable machine-consumable surface description.",
+			Arguments: []staticArgumentDescription{{
+				Name:        "format",
+				Type:        "string",
+				Description: fmt.Sprintf("Supported formats: %s.", supportedDescribeFormatNames()),
+				Required:    true,
+			}},
+		},
+		{
+			Name:    "restore",
+			Command: "restore",
+			CLI:     "rein [global flags] restore [flags] <source>",
+			Summary: "Atomically replace the selected instance state from a backup copy.",
+			Flags: []staticFlagDescription{{
+				Name:        "stop",
+				Type:        "bool",
+				Description: "Stop the selected daemon before replacing its state directory.",
+			}},
+			Arguments: []staticArgumentDescription{{
+				Name:        "source",
+				Type:        "path",
+				Description: "Backup directory to restore from.",
+				Required:    true,
+			}},
+		},
+		{
+			Name:    "tui",
+			Command: "tui",
+			CLI:     "rein [global flags] tui",
+			Summary: "Terminal UI over the canonical gRPC surface.",
+		},
+		{
+			Name:    "version",
+			Command: "version",
+			CLI:     "rein version [--json]",
+			Summary: "Print the CLI version and embedded build provenance.",
+			Flags: []staticFlagDescription{{
+				Name:        "json",
+				Type:        "bool",
+				Description: "Emit structured JSON.",
+			}},
+		},
+	}
+}
+
+func buildDescribeSurfaceCompact() (describeSurface, error) {
+	compactDescribeSurfaceOnce.Do(func() {
+		compactDescribeSurface, compactDescribeSurfaceErr = constructDescribeSurface(false)
+	})
+	return compactDescribeSurface, compactDescribeSurfaceErr
+}
+
+func buildDescribeSurfaceFull() (describeSurface, error) {
+	fullDescribeSurfaceOnce.Do(func() {
+		fullDescribeSurface, fullDescribeSurfaceErr = constructDescribeSurface(true)
+	})
+	return fullDescribeSurface, fullDescribeSurfaceErr
+}
+
+func constructDescribeSurface(includeSchemas bool) (describeSurface, error) {
 	commandsByKey, err := loadRPCCommands()
 	if err != nil {
 		return describeSurface{}, err
@@ -168,24 +330,54 @@ func buildDescribeSurface() (describeSurface, error) {
 	})
 
 	gatewayStub := gateway.NewV2Stub()
-	return describeSurface{
-		Title:       "rein",
-		Summary:     "Descriptor-driven reference for the rein CLI, gRPC services, and v2 gateway stub.",
-		Conventions: rootConventions(),
-		Usage:       rootUsageLines(),
-		Formats:     supportedDescribeFormats(),
-		GlobalFlags: globalFlagDescriptions(),
-		Commands:    commands,
-		Daemon: daemonCommandDescription{
-			Name:    "daemon_serve",
-			CLI:     "rein [global flags] daemon serve [flags]",
-			Summary: "Start the daemon and expose the canonical gRPC surface.",
-			Flags:   daemonServeFlagDescriptions(),
-		},
-		Gateway:  gatewayDescription{Routes: gatewayStub.Routes(), Streams: gatewayStub.Streams()},
-		Messages: collector.messageSchemas(),
-		Enums:    collector.enumSchemas(),
-	}, nil
+	surface := describeSurface{
+		Title:           "rein",
+		Summary:         "Descriptor-driven reference for the rein CLI, gRPC services, and v2 gateway stub.",
+		Conventions:     rootConventions(),
+		Usage:           rootUsageLines(),
+		Formats:         supportedDescribeFormats(),
+		GlobalFlags:     globalFlagDescriptions(),
+		Services:        describeServiceGroups(commandsByKey),
+		Commands:        commands,
+		UtilityCommands: utilityCommandDescriptions(),
+		Gateway:         gatewayDescription{Routes: gatewayStub.Routes(), Streams: gatewayStub.Streams()},
+		SchemaIndex:     collector.schemaIndex(),
+	}
+	if includeSchemas {
+		surface.Messages = collector.messageSchemas()
+		surface.Enums = collector.enumSchemas()
+	}
+	return surface, nil
+}
+
+func describeServiceGroups(commandsByKey map[string]rpcCommand) []serviceGroupDescription {
+	grouped := groupRPCCommandsByNoun(commandsByKey)
+	nouns := make([]string, 0, len(grouped))
+	for noun := range grouped {
+		nouns = append(nouns, noun)
+	}
+	sort.Strings(nouns)
+
+	services := make([]serviceGroupDescription, 0, len(nouns))
+	for _, noun := range nouns {
+		commands := grouped[noun]
+		verbs := make([]serviceVerbDescription, 0, len(commands))
+		for _, command := range commands {
+			verbs = append(verbs, serviceVerbDescription{
+				Name:    command.verb,
+				CLI:     fmt.Sprintf("rein [global flags] %s %s [flags]", command.noun, command.verb),
+				Summary: cleanComment(commentText(command.method)),
+			})
+		}
+		services = append(services, serviceGroupDescription{
+			Name:    noun,
+			CLI:     fmt.Sprintf("rein [global flags] %s <verb> [flags]", noun),
+			HelpCLI: fmt.Sprintf("rein [global flags] %s --help", noun),
+			Summary: cleanComment(commentText(commands[0].service)),
+			Verbs:   verbs,
+		})
+	}
+	return services
 }
 
 func describeCommand(command rpcCommand) commandDescription {
@@ -373,6 +565,45 @@ func (c *schemaCollector) addEnum(enum protoreflect.EnumDescriptor) {
 	c.enums[enum.FullName()] = enum
 }
 
+func (c *schemaCollector) schemaIndex() schemaIndexDescription {
+	messageNames := make([]string, 0, len(c.messages))
+	for name := range c.messages {
+		messageNames = append(messageNames, string(name))
+	}
+	sort.Strings(messageNames)
+	messages := make([]namedSchemaDescription, 0, len(messageNames))
+	for _, name := range messageNames {
+		message := c.messages[protoreflect.FullName(name)]
+		messages = append(messages, namedSchemaDescription{
+			Name:        name,
+			Description: cleanComment(commentText(message)),
+		})
+	}
+
+	enumNames := make([]string, 0, len(c.enums))
+	for name := range c.enums {
+		enumNames = append(enumNames, string(name))
+	}
+	sort.Strings(enumNames)
+	enums := make([]namedSchemaDescription, 0, len(enumNames))
+	for _, name := range enumNames {
+		enum := c.enums[protoreflect.FullName(name)]
+		enums = append(enums, namedSchemaDescription{
+			Name:        name,
+			Description: cleanComment(commentText(enum)),
+		})
+	}
+
+	return schemaIndexDescription{
+		DetailFormat:  describeFormatMCPFull,
+		DetailCommand: "rein [global flags] describe-as=mcp-full",
+		MessageCount:  len(messages),
+		EnumCount:     len(enums),
+		Messages:      messages,
+		Enums:         enums,
+	}
+}
+
 func (c *schemaCollector) messageSchemas() []messageSchemaDescription {
 	names := make([]string, 0, len(c.messages))
 	for name := range c.messages {
@@ -416,15 +647,25 @@ func (c *schemaCollector) enumSchemas() []enumSchemaDescription {
 }
 
 func renderDescribeAs(format string) (string, error) {
-	surface, err := buildDescribeSurface()
-	if err != nil {
-		return "", err
-	}
 	switch format {
 	case describeFormatCLI:
+		surface, err := buildDescribeSurfaceFull()
+		if err != nil {
+			return "", err
+		}
 		return renderDescribeCLI(surface), nil
 	case describeFormatMCP:
+		surface, err := buildDescribeSurfaceCompact()
+		if err != nil {
+			return "", err
+		}
 		return renderDescribeMCP(surface), nil
+	case describeFormatMCPFull:
+		surface, err := buildDescribeSurfaceFull()
+		if err != nil {
+			return "", err
+		}
+		return renderDescribeMCPFull(surface), nil
 	default:
 		return "", fmt.Errorf("unsupported describe-as format %q (supported: %s)", format, supportedDescribeFormatNames())
 	}
@@ -471,54 +712,76 @@ func renderDescribeCLI(surface describeSurface) string {
 	}
 	buf.WriteString("\n")
 
-	fmt.Fprintln(&buf, "COMMAND GROUPS")
-	currentNoun := ""
-	for _, command := range surface.Commands {
-		if command.Noun != currentNoun {
-			currentNoun = command.Noun
-			fmt.Fprintf(&buf, "  %s\n", currentNoun)
-			if command.ServiceSummary != "" {
-				fmt.Fprintf(&buf, "    %s\n", command.ServiceSummary)
-			}
-			buf.WriteString("\n")
+	fmt.Fprintln(&buf, "SERVICE GROUPS")
+	for _, service := range surface.Services {
+		fmt.Fprintf(&buf, "  %s\n", service.Name)
+		fmt.Fprintf(&buf, "    summary: %s\n", service.Summary)
+		fmt.Fprintf(&buf, "    cli: %s\n", service.CLI)
+		fmt.Fprintf(&buf, "    help: %s\n", service.HelpCLI)
+		fmt.Fprintln(&buf, "    verbs:")
+		for _, verb := range service.Verbs {
+			fmt.Fprintf(&buf, "      %s\n", verb.Name)
+			fmt.Fprintf(&buf, "        cli: %s\n", verb.CLI)
+			fmt.Fprintf(&buf, "        summary: %s\n", verb.Summary)
 		}
-		fmt.Fprintf(&buf, "    COMMAND %s %s\n", command.Noun, command.Verb)
-		fmt.Fprintf(&buf, "      summary: %s\n", command.Summary)
-		fmt.Fprintf(&buf, "      grpc_service: %s\n", command.Service)
-		fmt.Fprintf(&buf, "      grpc_method: %s\n", command.Method)
-		fmt.Fprintf(&buf, "      full_method: %s\n", command.FullMethod)
-		fmt.Fprintf(&buf, "      request: %s\n", command.RequestType)
-		fmt.Fprintf(&buf, "      response: %s\n", command.ResponseType)
-		fmt.Fprintf(&buf, "      cli: %s\n", command.CLI)
-		fmt.Fprintf(&buf, "      flags:\n")
-		for _, flag := range command.Flags {
-			fmt.Fprintf(&buf, "        --%s %s\n", flag.Name, flag.Type)
-			fmt.Fprintf(&buf, "          proto: %s\n", flag.ProtoType)
-			fmt.Fprintf(&buf, "          description: %s\n", flag.Description)
-			fmt.Fprintf(&buf, "          accepts_json: %t\n", flag.AcceptsJSON)
-			if flag.SchemaRef != "" {
-				fmt.Fprintf(&buf, "          schema: %s\n", flag.SchemaRef)
+		buf.WriteString("\n")
+	}
+
+	fmt.Fprintln(&buf, "UTILITY COMMANDS")
+	for _, utility := range surface.UtilityCommands {
+		fmt.Fprintf(&buf, "  %s\n", utility.Command)
+		fmt.Fprintf(&buf, "    summary: %s\n", utility.Summary)
+		fmt.Fprintf(&buf, "    cli: %s\n", utility.CLI)
+		if len(utility.Arguments) == 0 {
+			fmt.Fprintln(&buf, "    args: none")
+		} else {
+			fmt.Fprintln(&buf, "    args:")
+			for _, arg := range utility.Arguments {
+				fmt.Fprintf(&buf, "      <%s> %s\n", arg.Name, arg.Type)
+				fmt.Fprintf(&buf, "        required: %t\n", arg.Required)
+				fmt.Fprintf(&buf, "        description: %s\n", arg.Description)
 			}
-			if len(flag.EnumValues) > 0 {
-				fmt.Fprintf(&buf, "          enum_values:\n")
-				for _, value := range flag.EnumValues {
-					fmt.Fprintf(&buf, "            - %s = %d\n", value.Name, value.Number)
-				}
+		}
+		if len(utility.Flags) == 0 {
+			fmt.Fprintln(&buf, "    flags: none")
+		} else {
+			fmt.Fprintln(&buf, "    flags:")
+			for _, flag := range utility.Flags {
+				fmt.Fprintf(&buf, "      --%s %s\n", flag.Name, flag.Type)
+				fmt.Fprintf(&buf, "        %s\n", flag.Description)
 			}
 		}
 		buf.WriteString("\n")
 	}
 
-	fmt.Fprintln(&buf, "DAEMON COMMANDS")
-	fmt.Fprintf(&buf, "  daemon serve\n")
-	fmt.Fprintf(&buf, "    summary: %s\n", surface.Daemon.Summary)
-	fmt.Fprintf(&buf, "    cli: %s\n", surface.Daemon.CLI)
-	fmt.Fprintln(&buf, "    flags:")
-	for _, flag := range surface.Daemon.Flags {
-		fmt.Fprintf(&buf, "      --%s %s\n", flag.Name, flag.Type)
-		fmt.Fprintf(&buf, "        %s\n", flag.Description)
+	fmt.Fprintln(&buf, "RPC COMMANDS")
+	for _, command := range surface.Commands {
+		fmt.Fprintf(&buf, "  COMMAND %s %s\n", command.Noun, command.Verb)
+		fmt.Fprintf(&buf, "    summary: %s\n", command.Summary)
+		fmt.Fprintf(&buf, "    grpc_service: %s\n", command.Service)
+		fmt.Fprintf(&buf, "    grpc_method: %s\n", command.Method)
+		fmt.Fprintf(&buf, "    full_method: %s\n", command.FullMethod)
+		fmt.Fprintf(&buf, "    request: %s\n", command.RequestType)
+		fmt.Fprintf(&buf, "    response: %s\n", command.ResponseType)
+		fmt.Fprintf(&buf, "    cli: %s\n", command.CLI)
+		fmt.Fprintf(&buf, "    flags:\n")
+		for _, flag := range command.Flags {
+			fmt.Fprintf(&buf, "      --%s %s\n", flag.Name, flag.Type)
+			fmt.Fprintf(&buf, "        proto: %s\n", flag.ProtoType)
+			fmt.Fprintf(&buf, "        description: %s\n", flag.Description)
+			fmt.Fprintf(&buf, "        accepts_json: %t\n", flag.AcceptsJSON)
+			if flag.SchemaRef != "" {
+				fmt.Fprintf(&buf, "        schema: %s\n", flag.SchemaRef)
+			}
+			if len(flag.EnumValues) > 0 {
+				fmt.Fprintf(&buf, "        enum_values:\n")
+				for _, value := range flag.EnumValues {
+					fmt.Fprintf(&buf, "          - %s = %d\n", value.Name, value.Number)
+				}
+			}
+		}
+		buf.WriteString("\n")
 	}
-	buf.WriteString("\n")
 
 	fmt.Fprintln(&buf, "GATEWAY STUB")
 	fmt.Fprintln(&buf, "  routes:")
@@ -532,6 +795,13 @@ func renderDescribeCLI(surface describeSurface) string {
 		fmt.Fprintf(&buf, "      event: %s\n", stream.Event)
 		fmt.Fprintf(&buf, "      purpose: %s\n", stream.Purpose)
 	}
+	buf.WriteString("\n")
+
+	fmt.Fprintln(&buf, "SCHEMA INDEX")
+	fmt.Fprintf(&buf, "  detail_format: %s\n", surface.SchemaIndex.DetailFormat)
+	fmt.Fprintf(&buf, "  detail_command: %s\n", surface.SchemaIndex.DetailCommand)
+	fmt.Fprintf(&buf, "  message_count: %d\n", surface.SchemaIndex.MessageCount)
+	fmt.Fprintf(&buf, "  enum_count: %d\n", surface.SchemaIndex.EnumCount)
 	buf.WriteString("\n")
 
 	fmt.Fprintln(&buf, "SCHEMAS")
@@ -575,6 +845,14 @@ func renderDescribeCLI(surface describeSurface) string {
 }
 
 func renderDescribeMCP(surface describeSurface) string {
+	return renderDescribeMCPDocument(surface, false)
+}
+
+func renderDescribeMCPFull(surface describeSurface) string {
+	return renderDescribeMCPDocument(surface, true)
+}
+
+func renderDescribeMCPDocument(surface describeSurface, includeDetailedSchemas bool) string {
 	var buf bytes.Buffer
 	writeYAMLString(&buf, "version", "1")
 	writeYAMLString(&buf, "surface", surface.Title)
@@ -603,6 +881,49 @@ func renderDescribeMCP(surface describeSurface) string {
 		fmt.Fprintf(&buf, "    type: %s\n", yamlString(flag.Type))
 		fmt.Fprintf(&buf, "    description: %s\n", yamlString(flag.Description))
 	}
+	buf.WriteString("services:\n")
+	for _, service := range surface.Services {
+		buf.WriteString("  - name: ")
+		buf.WriteString(yamlString(service.Name))
+		buf.WriteString("\n")
+		fmt.Fprintf(&buf, "    cli: %s\n", yamlString(service.CLI))
+		fmt.Fprintf(&buf, "    help_cli: %s\n", yamlString(service.HelpCLI))
+		fmt.Fprintf(&buf, "    summary: %s\n", yamlString(service.Summary))
+		buf.WriteString("    verbs:\n")
+		for _, verb := range service.Verbs {
+			buf.WriteString("      - name: ")
+			buf.WriteString(yamlString(verb.Name))
+			buf.WriteString("\n")
+			fmt.Fprintf(&buf, "        cli: %s\n", yamlString(verb.CLI))
+			fmt.Fprintf(&buf, "        summary: %s\n", yamlString(verb.Summary))
+		}
+	}
+	buf.WriteString("utility_commands:\n")
+	for _, utility := range surface.UtilityCommands {
+		buf.WriteString("  - name: ")
+		buf.WriteString(yamlString(utility.Name))
+		buf.WriteString("\n")
+		fmt.Fprintf(&buf, "    command: %s\n", yamlString(utility.Command))
+		fmt.Fprintf(&buf, "    cli: %s\n", yamlString(utility.CLI))
+		fmt.Fprintf(&buf, "    summary: %s\n", yamlString(utility.Summary))
+		buf.WriteString("    arguments:\n")
+		for _, arg := range utility.Arguments {
+			buf.WriteString("      - name: ")
+			buf.WriteString(yamlString(arg.Name))
+			buf.WriteString("\n")
+			fmt.Fprintf(&buf, "        type: %s\n", yamlString(arg.Type))
+			fmt.Fprintf(&buf, "        description: %s\n", yamlString(arg.Description))
+			fmt.Fprintf(&buf, "        required: %t\n", arg.Required)
+		}
+		buf.WriteString("    flags:\n")
+		for _, flag := range utility.Flags {
+			buf.WriteString("      - name: ")
+			buf.WriteString(yamlString(flag.Name))
+			buf.WriteString("\n")
+			fmt.Fprintf(&buf, "        type: %s\n", yamlString(flag.Type))
+			fmt.Fprintf(&buf, "        description: %s\n", yamlString(flag.Description))
+		}
+	}
 	buf.WriteString("commands:\n")
 	for _, command := range surface.Commands {
 		buf.WriteString("  - name: ")
@@ -623,20 +944,6 @@ func renderDescribeMCP(surface describeSurface) string {
 			writeYAMLField(&buf, "      ", flag)
 		}
 	}
-	buf.WriteString("daemon:\n")
-	buf.WriteString("  - name: ")
-	buf.WriteString(yamlString(surface.Daemon.Name))
-	buf.WriteString("\n")
-	fmt.Fprintf(&buf, "    cli: %s\n", yamlString(surface.Daemon.CLI))
-	fmt.Fprintf(&buf, "    summary: %s\n", yamlString(surface.Daemon.Summary))
-	buf.WriteString("    flags:\n")
-	for _, flag := range surface.Daemon.Flags {
-		buf.WriteString("      - name: ")
-		buf.WriteString(yamlString(flag.Name))
-		buf.WriteString("\n")
-		fmt.Fprintf(&buf, "        type: %s\n", yamlString(flag.Type))
-		fmt.Fprintf(&buf, "        description: %s\n", yamlString(flag.Description))
-	}
 	buf.WriteString("gateway:\n")
 	buf.WriteString("  routes:\n")
 	for _, route := range surface.Gateway.Routes {
@@ -654,31 +961,52 @@ func renderDescribeMCP(surface describeSurface) string {
 		fmt.Fprintf(&buf, "      event: %s\n", yamlString(stream.Event))
 		fmt.Fprintf(&buf, "      purpose: %s\n", yamlString(stream.Purpose))
 	}
-	buf.WriteString("schemas:\n")
+	buf.WriteString("schema_index:\n")
+	fmt.Fprintf(&buf, "  detail_format: %s\n", yamlString(surface.SchemaIndex.DetailFormat))
+	fmt.Fprintf(&buf, "  detail_command: %s\n", yamlString(surface.SchemaIndex.DetailCommand))
+	fmt.Fprintf(&buf, "  message_count: %d\n", surface.SchemaIndex.MessageCount)
+	fmt.Fprintf(&buf, "  enum_count: %d\n", surface.SchemaIndex.EnumCount)
 	buf.WriteString("  messages:\n")
-	for _, message := range surface.Messages {
+	for _, message := range surface.SchemaIndex.Messages {
 		buf.WriteString("    - name: ")
 		buf.WriteString(yamlString(message.Name))
 		buf.WriteString("\n")
 		fmt.Fprintf(&buf, "      description: %s\n", yamlString(message.Description))
-		buf.WriteString("      fields:\n")
-		for _, field := range message.Fields {
-			writeYAMLField(&buf, "        ", field)
-		}
 	}
 	buf.WriteString("  enums:\n")
-	for _, enum := range surface.Enums {
+	for _, enum := range surface.SchemaIndex.Enums {
 		buf.WriteString("    - name: ")
 		buf.WriteString(yamlString(enum.Name))
 		buf.WriteString("\n")
 		fmt.Fprintf(&buf, "      description: %s\n", yamlString(enum.Description))
-		buf.WriteString("      values:\n")
-		for _, value := range enum.Values {
-			buf.WriteString("        - name: ")
-			buf.WriteString(yamlString(value.Name))
+	}
+	if includeDetailedSchemas {
+		buf.WriteString("schemas:\n")
+		buf.WriteString("  messages:\n")
+		for _, message := range surface.Messages {
+			buf.WriteString("    - name: ")
+			buf.WriteString(yamlString(message.Name))
 			buf.WriteString("\n")
-			fmt.Fprintf(&buf, "          number: %d\n", value.Number)
-			fmt.Fprintf(&buf, "          description: %s\n", yamlString(value.Description))
+			fmt.Fprintf(&buf, "      description: %s\n", yamlString(message.Description))
+			buf.WriteString("      fields:\n")
+			for _, field := range message.Fields {
+				writeYAMLField(&buf, "        ", field)
+			}
+		}
+		buf.WriteString("  enums:\n")
+		for _, enum := range surface.Enums {
+			buf.WriteString("    - name: ")
+			buf.WriteString(yamlString(enum.Name))
+			buf.WriteString("\n")
+			fmt.Fprintf(&buf, "      description: %s\n", yamlString(enum.Description))
+			buf.WriteString("      values:\n")
+			for _, value := range enum.Values {
+				buf.WriteString("        - name: ")
+				buf.WriteString(yamlString(value.Name))
+				buf.WriteString("\n")
+				fmt.Fprintf(&buf, "          number: %d\n", value.Number)
+				fmt.Fprintf(&buf, "          description: %s\n", yamlString(value.Description))
+			}
 		}
 	}
 	return buf.String()
