@@ -13,6 +13,8 @@ import (
 
 	"github.com/golang-migrate/migrate/v4"
 	_ "modernc.org/sqlite"
+
+	"github.com/earchibald/rein/internal/settings"
 )
 
 const (
@@ -29,6 +31,7 @@ var (
 	ErrNotFound             = errors.New("sqlite: record not found")
 	ErrLockVersionMismatch  = errors.New("sqlite: lock version mismatch")
 	ErrInvalidMigrationStep = errors.New("sqlite: migration steps must be positive")
+	ErrAmbiguousSettings    = errors.New("sqlite: cannot migrate multiple legacy settings rows to scoped settings")
 )
 
 type EntityKind string
@@ -41,7 +44,6 @@ const (
 	TaskStepKind    EntityKind = "taskstep"
 	SideEffectKind  EntityKind = "sideeffect"
 	CostEventKind   EntityKind = "costevent"
-	SettingsKind    EntityKind = "settings"
 	FeatureFlagKind EntityKind = "featureflag"
 )
 
@@ -53,7 +55,6 @@ var entityTables = map[EntityKind]string{
 	TaskStepKind:    "tasksteps",
 	SideEffectKind:  "sideeffects",
 	CostEventKind:   "costevents",
-	SettingsKind:    "settings",
 	FeatureFlagKind: "featureflags",
 }
 
@@ -74,6 +75,21 @@ type Record struct {
 type ListOptions struct {
 	JSONEquals map[string]string
 	Limit      int
+}
+
+type SettingsProfile struct {
+	Layer       settings.Layer
+	ScopeID     string
+	Values      map[string]string
+	LockVersion int64
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+type SettingsResolutionScope struct {
+	ProjectID   string
+	WorkflowID  string
+	ExecutionID string
 }
 
 type Store struct {
@@ -106,6 +122,11 @@ func OpenAndMigrate(ctx context.Context, cfg Config) (*Store, error) {
 
 	migrationDB, err := openDB(ctx, normalized)
 	if err != nil {
+		return nil, err
+	}
+
+	if err := validateLegacySettingsUpgrade(ctx, migrationDB, normalized.MigrationsTable); err != nil {
+		_ = migrationDB.Close()
 		return nil, err
 	}
 
@@ -375,6 +396,181 @@ func (s *Store) Delete(ctx context.Context, kind EntityKind, id string, expected
 	return s.requireVersionedWrite(ctx, table, id, expectedLockVersion, result)
 }
 
+func (s *Store) CreateSettingsProfile(ctx context.Context, registry settings.Registry, layer settings.Layer, scopeID string, values map[string]string) (SettingsProfile, error) {
+	normalizedScopeID, payload, normalizedValues, err := prepareSettingsPayload(registry, layer, scopeID, values)
+	if err != nil {
+		return SettingsProfile{}, err
+	}
+
+	now := time.Now().UTC()
+	encodedNow := now.Format(time.RFC3339Nano)
+
+	if _, err := s.db.ExecContext(
+		ctx,
+		`INSERT INTO settings (id, scope_layer, scope_id, lock_version, payload, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		settingsProfileID(layer, normalizedScopeID),
+		string(layer),
+		normalizedScopeID,
+		1,
+		payload,
+		encodedNow,
+		encodedNow,
+	); err != nil {
+		return SettingsProfile{}, fmt.Errorf("sqlite: create settings %q/%q: %w", layer, normalizedScopeID, err)
+	}
+
+	return SettingsProfile{
+		Layer:       layer,
+		ScopeID:     normalizedScopeID,
+		Values:      normalizedValues,
+		LockVersion: 1,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}, nil
+}
+
+func (s *Store) GetSettingsProfile(ctx context.Context, layer settings.Layer, scopeID string) (SettingsProfile, error) {
+	normalizedScopeID, err := settings.NormalizeScopeID(layer, scopeID)
+	if err != nil {
+		return SettingsProfile{}, err
+	}
+
+	var (
+		profile      SettingsProfile
+		payload      []byte
+		createdAtRaw string
+		updatedAtRaw string
+	)
+
+	err = s.db.QueryRowContext(
+		ctx,
+		`SELECT scope_layer, scope_id, lock_version, payload, created_at, updated_at FROM settings WHERE scope_layer = ? AND scope_id = ?`,
+		string(layer),
+		normalizedScopeID,
+	).Scan(&profile.Layer, &profile.ScopeID, &profile.LockVersion, &payload, &createdAtRaw, &updatedAtRaw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return SettingsProfile{}, ErrNotFound
+	}
+	if err != nil {
+		return SettingsProfile{}, fmt.Errorf("sqlite: get settings %q/%q: %w", layer, normalizedScopeID, err)
+	}
+
+	profile.Values, err = decodeSettingsValues(payload)
+	if err != nil {
+		return SettingsProfile{}, err
+	}
+	profile.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAtRaw)
+	if err != nil {
+		return SettingsProfile{}, fmt.Errorf("sqlite: parse created_at for settings %q/%q: %w", layer, normalizedScopeID, err)
+	}
+	profile.UpdatedAt, err = time.Parse(time.RFC3339Nano, updatedAtRaw)
+	if err != nil {
+		return SettingsProfile{}, fmt.Errorf("sqlite: parse updated_at for settings %q/%q: %w", layer, normalizedScopeID, err)
+	}
+
+	return profile, nil
+}
+
+func (s *Store) UpdateSettingsProfile(ctx context.Context, registry settings.Registry, layer settings.Layer, scopeID string, expectedLockVersion int64, values map[string]string) (SettingsProfile, error) {
+	if expectedLockVersion < 1 {
+		return SettingsProfile{}, ErrLockVersionMismatch
+	}
+
+	normalizedScopeID, payload, _, err := prepareSettingsPayload(registry, layer, scopeID, values)
+	if err != nil {
+		return SettingsProfile{}, err
+	}
+
+	encodedNow := time.Now().UTC().Format(time.RFC3339Nano)
+	result, err := s.db.ExecContext(
+		ctx,
+		`UPDATE settings SET payload = ?, lock_version = lock_version + 1, updated_at = ? WHERE scope_layer = ? AND scope_id = ? AND lock_version = ?`,
+		payload,
+		encodedNow,
+		string(layer),
+		normalizedScopeID,
+		expectedLockVersion,
+	)
+	if err != nil {
+		return SettingsProfile{}, fmt.Errorf("sqlite: update settings %q/%q: %w", layer, normalizedScopeID, err)
+	}
+
+	if err := s.requireSettingsVersionedWrite(ctx, layer, normalizedScopeID, expectedLockVersion, result); err != nil {
+		return SettingsProfile{}, err
+	}
+
+	return s.GetSettingsProfile(ctx, layer, normalizedScopeID)
+}
+
+func (s *Store) DeleteSettingsProfile(ctx context.Context, layer settings.Layer, scopeID string, expectedLockVersion int64) error {
+	if expectedLockVersion < 1 {
+		return ErrLockVersionMismatch
+	}
+
+	normalizedScopeID, err := settings.NormalizeScopeID(layer, scopeID)
+	if err != nil {
+		return err
+	}
+
+	result, err := s.db.ExecContext(
+		ctx,
+		`DELETE FROM settings WHERE scope_layer = ? AND scope_id = ? AND lock_version = ?`,
+		string(layer),
+		normalizedScopeID,
+		expectedLockVersion,
+	)
+	if err != nil {
+		return fmt.Errorf("sqlite: delete settings %q/%q: %w", layer, normalizedScopeID, err)
+	}
+
+	return s.requireSettingsVersionedWrite(ctx, layer, normalizedScopeID, expectedLockVersion, result)
+}
+
+func (s *Store) ResolveSettings(ctx context.Context, registry settings.Registry, scope SettingsResolutionScope) (map[string]settings.ResolvedValue, error) {
+	var profiles []settings.ScopedValues
+
+	daemonProfile, err := s.GetSettingsProfile(ctx, settings.LayerDaemonGlobal, "")
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	if err == nil {
+		profiles = append(profiles, settings.ScopedValues{
+			Layer:   daemonProfile.Layer,
+			ScopeID: daemonProfile.ScopeID,
+			Values:  daemonProfile.Values,
+		})
+	}
+
+	for _, target := range []struct {
+		layer   settings.Layer
+		scopeID string
+	}{
+		{layer: settings.LayerProject, scopeID: scope.ProjectID},
+		{layer: settings.LayerWorkflow, scopeID: scope.WorkflowID},
+		{layer: settings.LayerExecution, scopeID: scope.ExecutionID},
+	} {
+		if target.scopeID == "" {
+			continue
+		}
+
+		profile, err := s.GetSettingsProfile(ctx, target.layer, target.scopeID)
+		if errors.Is(err, ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		profiles = append(profiles, settings.ScopedValues{
+			Layer:   profile.Layer,
+			ScopeID: profile.ScopeID,
+			Values:  profile.Values,
+		})
+	}
+
+	return settings.Resolve(registry, profiles...)
+}
+
 func (s *Store) requireVersionedWrite(ctx context.Context, table, id string, expectedLockVersion int64, result sql.Result) error {
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
@@ -480,4 +676,78 @@ func clonePayload(payload json.RawMessage) json.RawMessage {
 	}
 
 	return append(json.RawMessage(nil), payload...)
+}
+
+func cloneSettingsValues(values map[string]string) map[string]string {
+	if values == nil {
+		return map[string]string{}
+	}
+
+	cloned := make(map[string]string, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+
+	return cloned
+}
+
+func decodeSettingsValues(payload []byte) (map[string]string, error) {
+	values := make(map[string]string)
+	if err := json.Unmarshal(payload, &values); err != nil {
+		return nil, fmt.Errorf("sqlite: decode settings payload: %w", err)
+	}
+
+	return cloneSettingsValues(values), nil
+}
+
+func prepareSettingsPayload(registry settings.Registry, layer settings.Layer, scopeID string, values map[string]string) (normalizedScopeID string, payload []byte, normalizedValues map[string]string, err error) {
+	normalizedScopeID, err = settings.NormalizeScopeID(layer, scopeID)
+	if err != nil {
+		return "", nil, nil, err
+	}
+
+	normalizedValues = cloneSettingsValues(values)
+	if err := registry.Validate(layer, normalizedValues); err != nil {
+		return "", nil, nil, err
+	}
+
+	payload, err = json.Marshal(normalizedValues)
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("sqlite: encode settings payload: %w", err)
+	}
+
+	return normalizedScopeID, payload, normalizedValues, nil
+}
+
+func settingsProfileID(layer settings.Layer, scopeID string) string {
+	return fmt.Sprintf("%s:%s", layer, scopeID)
+}
+
+func (s *Store) requireSettingsVersionedWrite(ctx context.Context, layer settings.Layer, scopeID string, expectedLockVersion int64, result sql.Result) error {
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("sqlite: inspect settings write result for %q/%q: %w", layer, scopeID, err)
+	}
+	if rowsAffected > 0 {
+		return nil
+	}
+
+	var currentLockVersion int64
+	err = s.db.QueryRowContext(
+		ctx,
+		`SELECT lock_version FROM settings WHERE scope_layer = ? AND scope_id = ?`,
+		string(layer),
+		scopeID,
+	).Scan(&currentLockVersion)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("sqlite: inspect current settings lock version for %q/%q: %w", layer, scopeID, err)
+	}
+	if currentLockVersion != expectedLockVersion {
+		return ErrLockVersionMismatch
+	}
+
+	return ErrNotFound
 }
