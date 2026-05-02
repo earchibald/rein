@@ -299,9 +299,6 @@ func (o DiscoveryOptions) withDefaults() DiscoveryOptions {
 	if strings.TrimSpace(o.DaemonAPIVersion) == "" {
 		o.DaemonAPIVersion = CurrentDaemonAPIVersion
 	}
-	if o.TrustedKeys == nil {
-		o.TrustedKeys = map[string]ed25519.PublicKey{}
-	}
 	return o
 }
 
