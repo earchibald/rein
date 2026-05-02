@@ -42,6 +42,13 @@ Modular orchestrator daemon — successor to op-obsidian. Go daemon + plural HMI
 - RN-23 boots the Claude Code coding-agent adapter as a remote GitHub marketplace entry (`earchibald/rein-adapter-claude-code`) instead of a local plugin checkout.
 - The registry and adapter APIs now surface that remote entry immediately; managed execution still reports an explicit “not wired yet” stub until the external adapter bridge lands.
 
+## External migration tooling
+
+- One-shot migration/import tools should live in separate repos rather than pulling legacy source-system dependencies into `rein`.
+- `github.com/earchibald/rein/instance` exposes the canonical instance layout helpers used to resolve `grpc.sock` and `rein.db` paths for external tools.
+- `github.com/earchibald/rein/sqlite` exposes the migrated locked-entity SQLite store needed to create and populate rein state from those external tools.
+- RN-27 boots the op-obsidian migration CLI as the separate repo `earchibald/rein-migrate-from-op-obsidian`.
+
 ## Development
 
 - `just proto` lints the Buf workspace and regenerates the committed Go protobuf/gRPC stubs.
