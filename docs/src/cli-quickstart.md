@@ -50,11 +50,19 @@ The JSON output includes:
 
 ## 4. Explore the shipped surface
 
-The CLI surface is descriptor-driven. Two built-in describe modes are useful when you want authoritative command metadata:
+The CLI surface is descriptor-driven. The built-in describe modes are useful when you want authoritative command metadata:
 
 ```bash
 ./bin/rein describe-as=cli
 ./bin/rein describe-as=mcp
+./bin/rein describe-as=mcp-full
+```
+
+For help discovery, use subgroup help before drilling into a verb:
+
+```bash
+./bin/rein project --help
+./bin/rein project list --help
 ```
 
 The common top-level service commands are:

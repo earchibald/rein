@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -35,6 +36,12 @@ import (
 )
 
 const defaultRPCTimeout = 10 * time.Second
+
+var (
+	loadRPCCommandsOnce  sync.Once
+	cachedRPCCommands    map[string]rpcCommand
+	cachedRPCCommandsErr error
+)
 
 type app struct {
 	stdout      io.Writer
@@ -303,7 +310,24 @@ func (a *app) runRPC(root rootConfig, args []string) error {
 	if err != nil {
 		return err
 	}
-	if len(args) < 2 {
+	grouped := groupRPCCommandsByNoun(commands)
+	if len(args) == 0 {
+		a.printRootHelp()
+		return flag.ErrHelp
+	}
+	if len(args) == 1 {
+		if serviceCommands, ok := grouped[args[0]]; ok {
+			a.printServiceHelp(args[0], serviceCommands)
+			return flag.ErrHelp
+		}
+		a.printRootHelp()
+		return flag.ErrHelp
+	}
+	if isHelpToken(args[1]) {
+		if serviceCommands, ok := grouped[args[0]]; ok {
+			a.printServiceHelp(args[0], serviceCommands)
+			return flag.ErrHelp
+		}
 		a.printRootHelp()
 		return flag.ErrHelp
 	}
@@ -373,6 +397,13 @@ func dialGRPC(_ context.Context, config clientConfig) (*grpc.ClientConn, error) 
 }
 
 func loadRPCCommands() (map[string]rpcCommand, error) {
+	loadRPCCommandsOnce.Do(func() {
+		cachedRPCCommands, cachedRPCCommandsErr = loadRPCCommandsUncached()
+	})
+	return cachedRPCCommands, cachedRPCCommandsErr
+}
+
+func loadRPCCommandsUncached() (map[string]rpcCommand, error) {
 	services := []struct {
 		fullName protoreflect.FullName
 		noun     string
@@ -414,6 +445,19 @@ func loadRPCCommands() (map[string]rpcCommand, error) {
 		}
 	}
 	return commands, nil
+}
+
+func groupRPCCommandsByNoun(commands map[string]rpcCommand) map[string][]rpcCommand {
+	grouped := make(map[string][]rpcCommand, len(commands))
+	for _, command := range commands {
+		grouped[command.noun] = append(grouped[command.noun], command)
+	}
+	for noun := range grouped {
+		sort.Slice(grouped[noun], func(i, j int) bool {
+			return grouped[noun][i].verb < grouped[noun][j].verb
+		})
+	}
+	return grouped
 }
 
 func methodVerb(name protoreflect.Name) (string, bool) {
@@ -551,15 +595,9 @@ func (a *app) printRootHelp() {
 	}
 
 	fmt.Fprintln(a.stderr, "Usage:")
-	fmt.Fprintln(a.stderr, "  rein [global flags] <service> <verb> [flags]")
-	fmt.Fprintln(a.stderr, "  rein [global flags] backup [flags] <destination>")
-	fmt.Fprintln(a.stderr, "  rein [global flags] daemon serve [flags]")
-	fmt.Fprintln(a.stderr, "  rein dashboards apply [flags]")
-	fmt.Fprintln(a.stderr, "  rein [global flags] doctor")
-	fmt.Fprintln(a.stderr, "  rein [global flags] describe-as=<format>")
-	fmt.Fprintln(a.stderr, "  rein [global flags] restore [flags] <source>")
-	fmt.Fprintln(a.stderr, "  rein [global flags] tui")
-	fmt.Fprintln(a.stderr, "  rein version [--json]")
+	for _, line := range rootUsageLines() {
+		fmt.Fprintf(a.stderr, "  %s\n", line)
+	}
 	fmt.Fprintln(a.stderr)
 	fmt.Fprintln(a.stderr, "Global flags:")
 	for _, flag := range globalFlagDescriptions() {
@@ -568,10 +606,7 @@ func (a *app) printRootHelp() {
 	fmt.Fprintln(a.stderr)
 	fmt.Fprintln(a.stderr, "Commands:")
 
-	grouped := map[string][]rpcCommand{}
-	for _, command := range commands {
-		grouped[command.noun] = append(grouped[command.noun], command)
-	}
+	grouped := groupRPCCommandsByNoun(commands)
 	nouns := make([]string, 0, len(grouped))
 	for noun := range grouped {
 		nouns = append(nouns, noun)
@@ -579,21 +614,23 @@ func (a *app) printRootHelp() {
 	sort.Strings(nouns)
 	for _, noun := range nouns {
 		commandsForNoun := grouped[noun]
-		sort.Slice(commandsForNoun, func(i, j int) bool { return commandsForNoun[i].verb < commandsForNoun[j].verb })
 		fmt.Fprintf(a.stderr, "  %s\t%s\n", noun, cleanComment(commentText(commandsForNoun[0].service)))
 		for _, command := range commandsForNoun {
 			fmt.Fprintf(a.stderr, "    %s %s\t%s\n", noun, command.verb, cleanComment(commentText(command.method)))
 		}
 	}
 	fmt.Fprintln(a.stderr)
-	fmt.Fprintln(a.stderr, "  backup\tCheckpoint SQLite WAL and atomically copy the selected instance state.")
-	fmt.Fprintln(a.stderr, "  tui\tTerminal UI over the canonical gRPC surface.")
-	fmt.Fprintln(a.stderr, "  daemon serve\tStart the daemon and expose the canonical gRPC surface.")
-	fmt.Fprintln(a.stderr, "  dashboards apply\tApply reference OTLP dashboards to a SigNoz workspace.")
-	fmt.Fprintln(a.stderr, "  doctor\tEmit JSON diagnostics for daemon health and local instance readiness.")
-	fmt.Fprintln(a.stderr, "  describe-as=<format>\tEmit a stable machine-consumable surface description.")
-	fmt.Fprintln(a.stderr, "  restore\tAtomically replace the selected instance state from a backup copy.")
-	fmt.Fprintln(a.stderr, "  version\tPrint the CLI version and embedded build provenance.")
+	for _, utility := range utilityCommandDescriptions() {
+		command := utility.Command
+		if utility.Name == "describe_as" {
+			command = "describe-as=<format>"
+		}
+		fmt.Fprintf(a.stderr, "  %s\t%s\n", command, utility.Summary)
+	}
+	fmt.Fprintln(a.stderr)
+	fmt.Fprintln(a.stderr, "Help:")
+	fmt.Fprintln(a.stderr, "  rein <service> --help\tList verbs for a service group.")
+	fmt.Fprintln(a.stderr, "  rein <service> <verb> --help\tShow flags for a specific RPC command.")
 }
 
 func (a *app) printBackupHelp() {
@@ -680,6 +717,23 @@ func (a *app) printTUIHelp() {
 	fmt.Fprintln(a.stderr, "  enter            Toggle compact vs expanded execution drilldown.")
 	fmt.Fprintln(a.stderr, "  r                Refresh daemon data.")
 	fmt.Fprintln(a.stderr, "  q                Quit.")
+}
+
+func (a *app) printServiceHelp(noun string, commands []rpcCommand) {
+	fmt.Fprintln(a.stderr, "Usage:")
+	fmt.Fprintf(a.stderr, "  rein [global flags] %s <verb> [flags]\n", noun)
+	fmt.Fprintf(a.stderr, "  rein [global flags] %s --help\n", noun)
+	fmt.Fprintln(a.stderr)
+	if len(commands) > 0 {
+		fmt.Fprintln(a.stderr, cleanComment(commentText(commands[0].service)))
+		fmt.Fprintln(a.stderr)
+	}
+	fmt.Fprintln(a.stderr, "Verbs:")
+	for _, command := range commands {
+		fmt.Fprintf(a.stderr, "  %s\t%s\n", command.verb, cleanComment(commentText(command.method)))
+	}
+	fmt.Fprintln(a.stderr)
+	fmt.Fprintf(a.stderr, "Use \"rein [global flags] %s <verb> --help\" for verb-specific flags.\n", noun)
 }
 
 func (a *app) printCommandHelp(command rpcCommand) {

@@ -112,11 +112,13 @@ mdbook serve docs
 - Use `rein restore <source>` to swap the selected instance state directory back from a backup copy.
 - Use `rein doctor` to inspect the selected instance and emit machine-parseable JSON readiness diagnostics.
 - Use `rein dashboards apply` to push the bundled `rein-dashboards` SigNoz reference dashboards into a SigNoz workspace over the HTTP API.
-- Use `rein describe-as=cli` for a manual-style, machine-consumable description of the CLI/gRPC surface and reachable protobuf schemas.
-- Use `rein describe-as=mcp` for a stable YAML description of commands, flags, gateway stub routes, and schemas suitable for wrapper/skill tooling.
+- Use `rein describe-as=cli` for a manual-style, machine-consumable description of the CLI/gRPC surface, service-group help, utility commands, and reachable protobuf schemas.
+- Use `rein describe-as=mcp` for a compact stable YAML description of commands, help entry points, gateway stub routes, and a schema index suitable for wrapper/skill tooling.
+- Use `rein describe-as=mcp-full` when you need the exhaustive YAML schema dump behind that compact MCP surface.
 - Use `rein tui` for the terminal-native HMI over that same daemon surface.
 - Use `rein version` to print the current CalVer, commit/build metadata, and local-vs-release provenance.
 - Service commands mirror the protobuf API: `rein project|issue|execution|workflow|adapter <verb>`.
+- Use `rein <service> --help` to discover verbs for a service group, then `rein <service> <verb> --help` for request flags.
 - Top-level request flags map 1:1 to top-level protobuf request fields and use the protobuf field names (for example `--project_id`).
 - Scalar fields take plain values; message, repeated, and map fields take JSON blobs.
 - Nested JSON payloads are decoded with protobuf JSON field names (for example `displayName` inside a `Project` payload).

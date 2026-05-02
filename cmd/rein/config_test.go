@@ -192,6 +192,61 @@ func TestAppCommandHelpUsesProtoComments(t *testing.T) {
 	}
 }
 
+func TestAppServiceGroupHelp(t *testing.T) {
+	t.Parallel()
+
+	var stdout, stderr bytes.Buffer
+	app := newApp(&stdout, &stderr, func(string) (string, bool) { return "", false }, func() (string, error) {
+		return "/Users/tester", nil
+	}, func() (string, error) {
+		return "/repo", nil
+	})
+
+	err := app.run([]string{"project", "--help"})
+	if err != flag.ErrHelp {
+		t.Fatalf("run() error = %v, want %v", err, flag.ErrHelp)
+	}
+
+	output := stderr.String()
+	for _, want := range []string{
+		"rein [global flags] project <verb> [flags]",
+		"List projects stored in the daemon.",
+		"list\tList projects stored in the daemon.",
+		"Use \"rein [global flags] project <verb> --help\" for verb-specific flags.",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("service help output missing %q\n%s", want, output)
+		}
+	}
+}
+
+func TestAppUnknownServiceHelpFallsBackToRootHelp(t *testing.T) {
+	t.Parallel()
+
+	var stdout, stderr bytes.Buffer
+	app := newApp(&stdout, &stderr, func(string) (string, bool) { return "", false }, func() (string, error) {
+		return "/Users/tester", nil
+	}, func() (string, error) {
+		return "/repo", nil
+	})
+
+	err := app.run([]string{"unknown", "--help"})
+	if err != flag.ErrHelp {
+		t.Fatalf("run() error = %v, want %v", err, flag.ErrHelp)
+	}
+
+	output := stderr.String()
+	for _, want := range []string{
+		"Usage:",
+		"rein [global flags] <service> <verb> [flags]",
+		"rein <service> --help\tList verbs for a service group.",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("root help output missing %q\n%s", want, output)
+		}
+	}
+}
+
 func TestRootHelpListsStaticCommands(t *testing.T) {
 	t.Parallel()
 
@@ -216,6 +271,7 @@ func TestRootHelpListsStaticCommands(t *testing.T) {
 		"describe-as=<format>\tEmit a stable machine-consumable surface description.",
 		"restore\tAtomically replace the selected instance state from a backup copy.",
 		"tui\tTerminal UI over the canonical gRPC surface.",
+		"rein <service> --help\tList verbs for a service group.",
 		"rein version [--json]",
 		"version\tPrint the CLI version and embedded build provenance.",
 	} {
@@ -396,6 +452,9 @@ func TestAppDescribeCLIOutput(t *testing.T) {
 	output := stdout.String()
 	for _, want := range []string{
 		"REIN SURFACE v1",
+		"SERVICE GROUPS",
+		"UTILITY COMMANDS",
+		"  backup",
 		"COMMAND project list",
 		"full_method: /rein.v1.ProjectService/ListProjects",
 		"schema: rein.v1.PageRequest",
@@ -428,14 +487,52 @@ func TestAppDescribeMCPOutput(t *testing.T) {
 	output := stdout.String()
 	for _, want := range []string{
 		"surface: \"rein\"",
+		"services:",
+		"help_cli: \"rein [global flags] project --help\"",
+		"utility_commands:",
+		"command: \"backup\"",
 		"- name: \"project_list\"",
 		"full_method: \"/rein.v1.ProjectService/ListProjects\"",
 		"path: \"/v2/projects\"",
+		"schema_index:",
+		"detail_format: \"mcp-full\"",
 		"- name: \"rein.v1.ListProjectsRequest\"",
-		"- name: \"rein.v1.ProjectStatus\"",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("describe-as=mcp output missing %q\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "schemas:\n") {
+		t.Fatalf("describe-as=mcp output unexpectedly included full schemas\n%s", output)
+	}
+}
+
+func TestAppDescribeMCPFullOutput(t *testing.T) {
+	t.Parallel()
+
+	var stdout, stderr bytes.Buffer
+	app := newApp(&stdout, &stderr, func(string) (string, bool) { return "", false }, func() (string, error) {
+		return "/Users/tester", nil
+	}, func() (string, error) {
+		return "/repo", nil
+	})
+
+	if err := app.run([]string{"describe-as=mcp-full"}); err != nil {
+		t.Fatalf("run() error = %v", err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"schema_index:",
+		"schemas:",
+		"- name: \"rein.v1.ListProjectsRequest\"",
+		"- name: \"rein.v1.ProjectStatus\"",
+		"fields:",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("describe-as=mcp-full output missing %q\n%s", want, output)
 		}
 	}
 }
@@ -456,7 +553,7 @@ func TestAppDescribeHelpAndInvalidFormat(t *testing.T) {
 			t.Fatalf("run() error = %v, want %v", err, flag.ErrHelp)
 		}
 		output := stderr.String()
-		for _, want := range []string{"Formats:", "cli", "mcp"} {
+		for _, want := range []string{"Formats:", "cli", "mcp", "mcp-full"} {
 			if !strings.Contains(output, want) {
 				t.Fatalf("describe help missing %q\n%s", want, output)
 			}
@@ -475,7 +572,7 @@ func TestAppDescribeHelpAndInvalidFormat(t *testing.T) {
 		if err == nil {
 			t.Fatal("run() error = nil, want non-nil")
 		}
-		if !strings.Contains(err.Error(), "supported: cli, mcp") {
+		if !strings.Contains(err.Error(), "supported: cli, mcp, mcp-full") {
 			t.Fatalf("run() error = %v, want supported formats", err)
 		}
 	})
