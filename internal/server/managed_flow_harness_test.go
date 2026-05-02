@@ -17,6 +17,7 @@ import (
 
 	"github.com/earchibald/rein/adaptertest"
 	reinv1 "github.com/earchibald/rein/gen/go/rein/v1"
+	"github.com/earchibald/rein/internal/cost"
 	"github.com/earchibald/rein/internal/service"
 	"github.com/earchibald/rein/internal/storage/sqlite"
 )
@@ -33,6 +34,8 @@ func TestManagedFlowHarnessIssueToMergeFlow(t *testing.T) {
 	harness := newManagedFlowHarness(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	costEventsCh, unsubscribe := harness.subscribeCostEvents(4)
+	defer unsubscribe()
 
 	workflow := managedFlowWorkflow()
 	if err := harness.seedWorkflow(ctx, workflow); err != nil {
@@ -182,10 +185,145 @@ func TestManagedFlowHarnessIssueToMergeFlow(t *testing.T) {
 			t.Fatalf("GetIssue() labels[%q] = %q, want %q", key, got, want)
 		}
 	}
+
+	streamedCostEvents := collectCostEvents(t, ctx, costEventsCh, 4)
+	if got := []string{
+		streamedCostEvents[0].AdapterID,
+		streamedCostEvents[1].AdapterID,
+		streamedCostEvents[2].AdapterID,
+		streamedCostEvents[3].AdapterID,
+	}; !slices.Equal(got, []string{fakeTrackerAdapterID, fakeCodingAdapterID, fakeReviewAdapterID, fakeTrackerAdapterID}) {
+		t.Fatalf("streamed adapter ids = %v", got)
+	}
+
+	storedCostEvents, err := harness.listCostEvents(ctx, execution.GetId())
+	if err != nil {
+		t.Fatalf("listCostEvents() error = %v", err)
+	}
+	if len(storedCostEvents) != 4 {
+		t.Fatalf("listCostEvents() count = %d, want 4", len(storedCostEvents))
+	}
+
+	executionBudget, found, err := harness.budgetSnapshot(ctx, cost.ScopeExecution, execution.GetId())
+	if err != nil {
+		t.Fatalf("budgetSnapshot() error = %v", err)
+	}
+	if !found {
+		t.Fatal("budgetSnapshot() found = false, want true")
+	}
+	if executionBudget.EventCount != 4 || executionBudget.SpentMicros != 5600 {
+		t.Fatalf("execution budget snapshot = %+v, want 4 events and 5600 micros", executionBudget)
+	}
+}
+
+func TestManagedFlowHarnessBudgetHardLimitBlocksNewLaunches(t *testing.T) {
+	t.Parallel()
+
+	harness := newManagedFlowHarness(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	costEventsCh, unsubscribe := harness.subscribeCostEvents(1)
+	defer unsubscribe()
+
+	workflow := managedFlowWorkflow()
+	if err := harness.seedWorkflow(ctx, workflow); err != nil {
+		t.Fatalf("seedWorkflow() error = %v", err)
+	}
+
+	projectResp, err := harness.projectClient.CreateProject(ctx, &reinv1.CreateProjectRequest{
+		Project: &reinv1.Project{
+			Id:          "project-rein",
+			Slug:        "rein",
+			DisplayName: "rein",
+			Summary:     "Managed flow harness",
+			Status:      reinv1.ProjectStatus_PROJECT_STATUS_ACTIVE,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+
+	issueResp, err := harness.issueClient.CreateIssue(ctx, &reinv1.CreateIssueRequest{
+		Issue: &reinv1.Issue{
+			Id:         "RN-13",
+			ProjectId:  projectResp.GetProject().GetId(),
+			Title:      "Cost telemetry budgets",
+			Summary:    "Exercise launch blocking after a hard budget hit",
+			Status:     reinv1.IssueStatus_ISSUE_STATUS_OPEN,
+			Priority:   reinv1.IssuePriority_ISSUE_PRIORITY_HIGH,
+			WorkflowId: workflow.GetId(),
+			Assignee:   "copilot",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateIssue() error = %v", err)
+	}
+
+	if _, err := harness.configureBudget(ctx, cost.ScopeExecution, "exec-rn-9-001", cost.Limits{HardLimitMicros: 1000}); err != nil {
+		t.Fatalf("configureBudget() error = %v", err)
+	}
+
+	_, err = harness.executionClient.StartExecution(ctx, &reinv1.StartExecutionRequest{
+		IssueId:     issueResp.GetIssue().GetId(),
+		WorkflowId:  workflow.GetId(),
+		RequestedBy: "copilot",
+	})
+	if status.Code(err) != codes.ResourceExhausted {
+		t.Fatalf("StartExecution() status = %v, want %v", status.Code(err), codes.ResourceExhausted)
+	}
+
+	streamedCostEvents := collectCostEvents(t, ctx, costEventsCh, 1)
+	if len(streamedCostEvents) != 1 || streamedCostEvents[0].AdapterID != fakeTrackerAdapterID {
+		t.Fatalf("streamedCostEvents = %+v", streamedCostEvents)
+	}
+
+	executionResp, err := harness.executionClient.GetExecution(ctx, &reinv1.GetExecutionRequest{Id: "exec-rn-9-001"})
+	if err != nil {
+		t.Fatalf("GetExecution() error = %v", err)
+	}
+	execution := executionResp.GetExecution()
+	if execution.GetStatus() != reinv1.ExecutionStatus_EXECUTION_STATUS_FAILED {
+		t.Fatalf("GetExecution() status = %s, want %s", execution.GetStatus(), reinv1.ExecutionStatus_EXECUTION_STATUS_FAILED)
+	}
+	if execution.GetMetadata()["result"] != "budget_hard_limit" {
+		t.Fatalf("GetExecution() result = %q, want %q", execution.GetMetadata()["result"], "budget_hard_limit")
+	}
+	if execution.GetMetadata()["branch"] == "" || execution.GetMetadata()["worktree"] == "" {
+		t.Fatalf("GetExecution() missing first-step metadata: %+v", execution.GetMetadata())
+	}
+	if execution.GetMetadata()["pr_url"] != "" {
+		t.Fatalf("GetExecution() pr_url = %q, want empty", execution.GetMetadata()["pr_url"])
+	}
+
+	issueState, err := harness.issueClient.GetIssue(ctx, &reinv1.GetIssueRequest{Id: issueResp.GetIssue().GetId()})
+	if err != nil {
+		t.Fatalf("GetIssue() error = %v", err)
+	}
+	if issueState.GetIssue().GetStatus() != reinv1.IssueStatus_ISSUE_STATUS_IN_PROGRESS {
+		t.Fatalf("GetIssue() status = %s, want %s", issueState.GetIssue().GetStatus(), reinv1.IssueStatus_ISSUE_STATUS_IN_PROGRESS)
+	}
+
+	storedCostEvents, err := harness.listCostEvents(ctx, execution.GetId())
+	if err != nil {
+		t.Fatalf("listCostEvents() error = %v", err)
+	}
+	if len(storedCostEvents) != 1 {
+		t.Fatalf("listCostEvents() count = %d, want 1", len(storedCostEvents))
+	}
+
+	executionBudget, found, err := harness.budgetSnapshot(ctx, cost.ScopeExecution, execution.GetId())
+	if err != nil {
+		t.Fatalf("budgetSnapshot() error = %v", err)
+	}
+	if !found || !executionBudget.HardLimited() || executionBudget.EventCount != 1 || executionBudget.SpentMicros != 1200 {
+		t.Fatalf("execution budget snapshot = %+v, want hard-limited first-step spend", executionBudget)
+	}
 }
 
 type managedFlowHarness struct {
 	adapterClient   reinv1.AdapterServiceClient
+	costRecorder    *cost.Recorder
+	costStream      *cost.Stream
 	executionClient reinv1.ExecutionServiceClient
 	issueClient     reinv1.IssueServiceClient
 	projectClient   reinv1.ProjectServiceClient
@@ -207,12 +345,15 @@ func newManagedFlowHarness(tb testing.TB) *managedFlowHarness {
 	})
 
 	adapters := newManagedFlowAdapterCatalog(tb)
+	costStream := cost.NewStream()
+	costRecorder := cost.NewRecorder(store, cost.WithPublisher(costStream))
 	bufconn := newBufconnHarness(tb, Options{
 		Services: service.Set{
 			Adapter: &managedFlowAdapterService{catalog: adapters},
 			Execution: &managedFlowExecutionService{
-				adapters: adapters,
-				store:    store,
+				adapters:     adapters,
+				costRecorder: costRecorder,
+				store:        store,
 			},
 			Issue:    &managedFlowIssueService{store: store},
 			Project:  &managedFlowProjectService{store: store},
@@ -222,6 +363,8 @@ func newManagedFlowHarness(tb testing.TB) *managedFlowHarness {
 
 	return &managedFlowHarness{
 		adapterClient:   reinv1.NewAdapterServiceClient(bufconn.conn),
+		costRecorder:    costRecorder,
+		costStream:      costStream,
 		executionClient: reinv1.NewExecutionServiceClient(bufconn.conn),
 		issueClient:     reinv1.NewIssueServiceClient(bufconn.conn),
 		projectClient:   reinv1.NewProjectServiceClient(bufconn.conn),
@@ -233,6 +376,22 @@ func newManagedFlowHarness(tb testing.TB) *managedFlowHarness {
 func (h *managedFlowHarness) seedWorkflow(ctx context.Context, workflow *reinv1.Workflow) error {
 	_, err := createStoredProto(ctx, h.store, sqlite.WorkflowKind, workflow.GetId(), workflow)
 	return err
+}
+
+func (h *managedFlowHarness) subscribeCostEvents(buffer int) (events <-chan cost.Event, unsubscribe func()) {
+	return h.costStream.Subscribe(buffer)
+}
+
+func (h *managedFlowHarness) configureBudget(ctx context.Context, scope cost.Scope, scopeID string, limits cost.Limits) (cost.Snapshot, error) {
+	return h.costRecorder.ConfigureBudget(ctx, scope, scopeID, "USD", limits)
+}
+
+func (h *managedFlowHarness) listCostEvents(ctx context.Context, executionID string) ([]cost.Event, error) {
+	return h.store.ListCostEvents(ctx, sqlite.CostEventFilter{ExecutionID: executionID})
+}
+
+func (h *managedFlowHarness) budgetSnapshot(ctx context.Context, scope cost.Scope, scopeID string) (cost.Snapshot, bool, error) {
+	return h.store.GetBudgetSnapshot(ctx, scope, scopeID)
 }
 
 type managedFlowAdapterService struct {
@@ -387,8 +546,9 @@ func (s *managedFlowIssueService) GetIssue(ctx context.Context, req *reinv1.GetI
 
 type managedFlowExecutionService struct {
 	reinv1.UnimplementedExecutionServiceServer
-	adapters *managedFlowAdapterCatalog
-	store    *sqlite.Store
+	adapters     *managedFlowAdapterCatalog
+	costRecorder *cost.Recorder
+	store        *sqlite.Store
 }
 
 func (s *managedFlowExecutionService) StartExecution(ctx context.Context, req *reinv1.StartExecutionRequest) (*reinv1.StartExecutionResponse, error) {
@@ -455,12 +615,38 @@ func (s *managedFlowExecutionService) StartExecution(ctx context.Context, req *r
 	}
 
 	state := &managedFlowState{
-		execution: execution,
-		issue:     issue,
-		workflow:  workflow,
+		costRecorder: s.costRecorder,
+		execution:    execution,
+		issue:        issue,
+		workflow:     workflow,
 	}
 
 	for _, step := range workflow.GetSteps() {
+		if s.costRecorder != nil {
+			admission, err := s.costRecorder.CheckLaunch(ctx, cost.ScopePath{
+				ProjectID:   issue.GetProjectId(),
+				IssueID:     issue.GetId(),
+				ExecutionID: execution.GetId(),
+			})
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "check budgets for execution %q: %v", execution.GetId(), err)
+			}
+			if !admission.Allowed {
+				execution.Status = reinv1.ExecutionStatus_EXECUTION_STATUS_FAILED
+				execution.FinishedTime = timestamppb.Now()
+				execution.Metadata["budget_block_scope"] = string(admission.BlockedBy.Scope)
+				execution.Metadata["budget_block_scope_id"] = admission.BlockedBy.ScopeID
+				execution.Metadata["result"] = "budget_hard_limit"
+				if _, updateErr := updateStoredProto(ctx, s.store, sqlite.ExecutionKind, execution.GetId(), executionRecord.LockVersion, execution); updateErr != nil {
+					return nil, status.Errorf(codes.Internal, "store budget-blocked execution %q: %v", execution.GetId(), updateErr)
+				}
+				return nil, status.Errorf(codes.ResourceExhausted, "budget hard limit reached for %s %q", admission.BlockedBy.Scope, admission.BlockedBy.ScopeID)
+			}
+			if len(admission.Warnings) > 0 {
+				execution.Metadata["budget_soft_warning_scope"] = string(admission.Warnings[0].Scope)
+			}
+		}
+
 		err := s.adapters.Run(ctx, state, step)
 		if err == nil {
 			continue
@@ -511,9 +697,10 @@ func (s *managedFlowExecutionService) GetExecution(ctx context.Context, req *rei
 }
 
 type managedFlowState struct {
-	execution *reinv1.Execution
-	issue     *reinv1.Issue
-	workflow  *reinv1.Workflow
+	costRecorder *cost.Recorder
+	execution    *reinv1.Execution
+	issue        *reinv1.Issue
+	workflow     *reinv1.Workflow
 }
 
 type managedFlowAdapterCatalog struct {
@@ -652,7 +839,7 @@ func (a *managedFlowTrackerAdapter) Descriptor() *reinv1.Adapter {
 	return proto.Clone(a.descriptor).(*reinv1.Adapter)
 }
 
-func (a *managedFlowTrackerAdapter) Run(_ context.Context, state *managedFlowState, step *reinv1.WorkflowStep) error {
+func (a *managedFlowTrackerAdapter) Run(ctx context.Context, state *managedFlowState, step *reinv1.WorkflowStep) error {
 	switch step.GetInputs()["operation"] {
 	case "prepare":
 		slug := slugify(state.issue.GetTitle())
@@ -663,7 +850,7 @@ func (a *managedFlowTrackerAdapter) Run(_ context.Context, state *managedFlowSta
 		state.execution.Metadata["worktree"] = worktree
 		state.issue.Labels["branch"] = branch
 		state.issue.Labels["worktree"] = worktree
-		return nil
+		return state.recordCost(ctx, step, 1200, cost.Usage{InputTokens: 120, OutputTokens: 40}, map[string]string{"operation": "prepare"})
 	case "merge":
 		if state.execution.Metadata["review_state"] != "APPROVED" {
 			return errors.New("review approval missing before merge")
@@ -679,7 +866,7 @@ func (a *managedFlowTrackerAdapter) Run(_ context.Context, state *managedFlowSta
 		state.execution.Metadata["merge_commit"] = mergeCommit
 		state.execution.Metadata["integration_branch"] = baseBranch
 		state.issue.Labels["merge_commit"] = mergeCommit
-		return nil
+		return state.recordCost(ctx, step, 1100, cost.Usage{InputTokens: 60, OutputTokens: 25}, map[string]string{"operation": "merge"})
 	default:
 		return fmt.Errorf("unsupported tracker operation %q", step.GetInputs()["operation"])
 	}
@@ -693,7 +880,7 @@ func (a *managedFlowCodingAdapter) Descriptor() *reinv1.Adapter {
 	return proto.Clone(a.descriptor).(*reinv1.Adapter)
 }
 
-func (a *managedFlowCodingAdapter) Run(_ context.Context, state *managedFlowState, step *reinv1.WorkflowStep) error {
+func (a *managedFlowCodingAdapter) Run(ctx context.Context, state *managedFlowState, step *reinv1.WorkflowStep) error {
 	if len(step.GetDependsOn()) == 0 || state.execution.Metadata["branch"] == "" || state.execution.Metadata["worktree"] == "" {
 		return errors.New("branch and worktree must exist before opening a pull request")
 	}
@@ -701,7 +888,7 @@ func (a *managedFlowCodingAdapter) Run(_ context.Context, state *managedFlowStat
 	state.execution.Metadata["pr_url"] = "https://tracker.fake/repos/rein/pull/101"
 	state.execution.Metadata["pr_state"] = "OPEN"
 	state.issue.Labels["pr_url"] = state.execution.Metadata["pr_url"]
-	return nil
+	return state.recordCost(ctx, step, 2400, cost.Usage{InputTokens: 400, OutputTokens: 180}, nil)
 }
 
 type managedFlowReviewAdapter struct {
@@ -712,7 +899,7 @@ func (a *managedFlowReviewAdapter) Descriptor() *reinv1.Adapter {
 	return proto.Clone(a.descriptor).(*reinv1.Adapter)
 }
 
-func (a *managedFlowReviewAdapter) Run(_ context.Context, state *managedFlowState, step *reinv1.WorkflowStep) error {
+func (a *managedFlowReviewAdapter) Run(ctx context.Context, state *managedFlowState, step *reinv1.WorkflowStep) error {
 	if len(step.GetDependsOn()) == 0 || state.execution.Metadata["pr_url"] == "" {
 		return errors.New("pull request must exist before review")
 	}
@@ -720,7 +907,7 @@ func (a *managedFlowReviewAdapter) Run(_ context.Context, state *managedFlowStat
 	state.execution.Metadata["review_state"] = "APPROVED"
 	state.execution.Metadata["reviewed_by"] = a.descriptor.GetId()
 	state.issue.Labels["review_state"] = "APPROVED"
-	return nil
+	return state.recordCost(ctx, step, 900, cost.Usage{InputTokens: 80, OutputTokens: 30}, nil)
 }
 
 func managedFlowWorkflow() *reinv1.Workflow {
@@ -883,6 +1070,46 @@ func cloneStringMap(values map[string]string) map[string]string {
 		cloned[key] = value
 	}
 	return cloned
+}
+
+func (s *managedFlowState) recordCost(ctx context.Context, step *reinv1.WorkflowStep, costMicros int64, usage cost.Usage, attributes map[string]string) error {
+	if s.costRecorder == nil {
+		return nil
+	}
+	attributes = cloneStringMap(attributes)
+	if attributes == nil {
+		attributes = map[string]string{}
+	}
+	attributes["workflow_step_id"] = step.GetId()
+	attributes["workflow_step_name"] = step.GetName()
+	_, err := s.costRecorder.Record(ctx, cost.Event{
+		ID:          fmt.Sprintf("%s-%s", s.execution.GetId(), step.GetId()),
+		Name:        "adapter.turn.completed",
+		ProjectID:   s.issue.GetProjectId(),
+		IssueID:     s.issue.GetId(),
+		ExecutionID: s.execution.GetId(),
+		WorkflowID:  s.workflow.GetId(),
+		AdapterID:   step.GetAdapterId(),
+		Currency:    "USD",
+		CostMicros:  costMicros,
+		Usage:       usage,
+		Attributes:  attributes,
+	})
+	return err
+}
+
+func collectCostEvents(tb testing.TB, ctx context.Context, events <-chan cost.Event, want int) []cost.Event {
+	tb.Helper()
+	collected := make([]cost.Event, 0, want)
+	for len(collected) < want {
+		select {
+		case event := <-events:
+			collected = append(collected, event)
+		case <-ctx.Done():
+			tb.Fatalf("collectCostEvents() timed out after %d/%d events: %v", len(collected), want, ctx.Err())
+		}
+	}
+	return collected
 }
 
 func adapterIDs(adapters []*reinv1.Adapter) []string {
