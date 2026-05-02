@@ -149,6 +149,12 @@ func TestGitHubTrackerAdapterPrepareOpenReviewAndMerge(t *testing.T) {
 	if got := state.Execution.Metadata["worktree"]; got != wantWorktree {
 		t.Fatalf("worktree = %q, want %q", got, wantWorktree)
 	}
+	if got := state.Issue.GetDaemonState().GetBranch(); got != wantBranch {
+		t.Fatalf("daemon_state.branch = %q, want %q", got, wantBranch)
+	}
+	if got := state.Issue.GetDaemonState().GetWorktree(); got != wantWorktree {
+		t.Fatalf("daemon_state.worktree = %q, want %q", got, wantWorktree)
+	}
 	if got := state.Execution.Metadata["auth_mode"]; got != "credential" {
 		t.Fatalf("auth_mode = %q, want credential", got)
 	}
@@ -170,6 +176,9 @@ func TestGitHubTrackerAdapterPrepareOpenReviewAndMerge(t *testing.T) {
 	if got := state.Execution.Metadata["pr_url"]; got != server.URL+"/earchibald/rein/pull/101" {
 		t.Fatalf("pr_url = %q, want %q", got, server.URL+"/earchibald/rein/pull/101")
 	}
+	if got := state.Issue.GetDaemonState().GetPrUrl(); got != server.URL+"/earchibald/rein/pull/101" {
+		t.Fatalf("daemon_state.pr_url = %q, want %q", got, server.URL+"/earchibald/rein/pull/101")
+	}
 
 	reviewEffect := &workflow.SideEffect{}
 	if err := adapter.Run(ctx, state, workflow.Phase{ID: "poll-review", Operation: "poll-review"}, workflow.DirectionForward, reviewEffect); err != nil {
@@ -177,6 +186,9 @@ func TestGitHubTrackerAdapterPrepareOpenReviewAndMerge(t *testing.T) {
 	}
 	if got := state.Execution.Metadata["review_state"]; got != "APPROVED" {
 		t.Fatalf("review_state = %q, want APPROVED", got)
+	}
+	if got := state.Issue.GetDaemonState().GetReviewState(); got != "APPROVED" {
+		t.Fatalf("daemon_state.review_state = %q, want APPROVED", got)
 	}
 	if got := state.Execution.Metadata["reviewed_by"]; got != "hubot" {
 		t.Fatalf("reviewed_by = %q, want hubot", got)
@@ -188,6 +200,9 @@ func TestGitHubTrackerAdapterPrepareOpenReviewAndMerge(t *testing.T) {
 	}
 	if got := state.Execution.Metadata["merge_commit"]; got != "merge-rn-22-001" {
 		t.Fatalf("merge_commit = %q, want merge-rn-22-001", got)
+	}
+	if got := state.Issue.GetDaemonState().GetMergeCommit(); got != "merge-rn-22-001" {
+		t.Fatalf("daemon_state.merge_commit = %q, want merge-rn-22-001", got)
 	}
 	if got := state.Execution.Metadata["result"]; got != "merged" {
 		t.Fatalf("result = %q, want merged", got)
@@ -299,6 +314,9 @@ func TestGitHubTrackerAdapterPollReviewClearsReviewedByWhenPending(t *testing.T)
 	}
 	if got := state.Execution.Metadata["review_state"]; got != "PENDING" {
 		t.Fatalf("review_state = %q, want PENDING", got)
+	}
+	if got := state.Issue.GetDaemonState().GetReviewState(); got != "PENDING" {
+		t.Fatalf("daemon_state.review_state = %q, want PENDING", got)
 	}
 	if _, ok := state.Execution.Metadata["reviewed_by"]; ok {
 		t.Fatalf("reviewed_by = %q, want cleared", state.Execution.Metadata["reviewed_by"])

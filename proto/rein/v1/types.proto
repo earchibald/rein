@@ -78,6 +78,17 @@ message Issue {
   google.protobuf.Timestamp created_time = 9;
   google.protobuf.Timestamp updated_time = 10;
   map<string, string> labels = 11;
+  IssueDaemonState daemon_state = 12;
+}
+
+message IssueDaemonState {
+  string execution_id = 1;
+  string branch = 2;
+  string worktree = 3;
+  string pr_url = 4;
+  string review_state = 5;
+  string merge_commit = 6;
+  string integration_status = 7;
 }
 
 message Execution {

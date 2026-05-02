@@ -437,7 +437,7 @@ func (m model) renderDetail(width, height int) string {
 	}
 	if issue := m.selectedIssue(); issue != nil {
 		lines = append(lines, "", "Issue", fmt.Sprintf("  %s", issue.GetTitle()), fmt.Sprintf("  %s • %s • assignee %s", statusText(issue.GetStatus().String()), priorityText(issue.GetPriority().String()), fallback(issue.GetAssignee(), "unassigned")))
-		if integration := issue.GetLabels()["integration_status"]; integration != "" {
+		if integration := issueIntegrationStatus(issue); integration != "" {
 			lines = append(lines, fmt.Sprintf("  workflow %s • integration %s", fallback(issue.GetWorkflowId(), "none"), integration))
 		} else {
 			lines = append(lines, fmt.Sprintf("  workflow %s", fallback(issue.GetWorkflowId(), "none")))
@@ -502,6 +502,16 @@ func (m model) workflowStatusLines(workflow *reinv1.Workflow) []string {
 		return []string{"Workflow has no steps."}
 	}
 	return lines
+}
+
+func issueIntegrationStatus(issue *reinv1.Issue) string {
+	if issue == nil {
+		return ""
+	}
+	if status := issue.GetDaemonState().GetIntegrationStatus(); status != "" {
+		return status
+	}
+	return issue.GetLabels()["integration_status"]
 }
 
 func (m model) executionDetailLines() []string {

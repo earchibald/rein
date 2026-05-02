@@ -48,3 +48,16 @@ func TestExecutionDetailLinesShowLookingGlassGate(t *testing.T) {
 		}
 	}
 }
+
+func TestIssueIntegrationStatusPrefersDaemonState(t *testing.T) {
+	issue := &reinv1.Issue{
+		Labels: map[string]string{"integration_status": "stale"},
+		DaemonState: &reinv1.IssueDaemonState{
+			IntegrationStatus: "merged",
+		},
+	}
+
+	if got := issueIntegrationStatus(issue); got != "merged" {
+		t.Fatalf("issueIntegrationStatus() = %q, want merged", got)
+	}
+}

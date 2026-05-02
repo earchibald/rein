@@ -143,9 +143,7 @@ func (a *githubTrackerAdapter) Run(ctx context.Context, state *workflow.RuntimeS
 	if state.Execution.Metadata == nil {
 		state.Execution.Metadata = map[string]string{}
 	}
-	if state.Issue.Labels == nil {
-		state.Issue.Labels = map[string]string{}
-	}
+	normalizeIssue(state.Issue)
 
 	config, err := a.resolveConfig(ctx, state)
 	if err != nil {
@@ -189,7 +187,7 @@ func (a *githubTrackerAdapter) runBackward(ctx context.Context, config githubTra
 		return a.closePullRequest(ctx, config, state, effect)
 	case "dismiss-review":
 		state.Execution.Metadata["review_state"] = "DISMISSED"
-		state.Issue.Labels["review_state"] = "DISMISSED"
+		ensureIssueDaemonState(state.Issue).ReviewState = "DISMISSED"
 		setEffectOutput(effect, "review_state", "DISMISSED")
 		return nil
 	case "reopen-merge":
@@ -231,8 +229,9 @@ func (a *githubTrackerAdapter) prepareIssue(ctx context.Context, config githubTr
 	state.Execution.Metadata["issue_url"] = issue.HTMLURL
 	state.Execution.Metadata["branch"] = branch
 	state.Execution.Metadata["worktree"] = worktreePath
-	state.Issue.Labels["branch"] = branch
-	state.Issue.Labels["worktree"] = worktreePath
+	issueState := ensureIssueDaemonState(state.Issue)
+	issueState.Branch = branch
+	issueState.Worktree = worktreePath
 	setEffectOutput(effect, "issue_url", issue.HTMLURL)
 	setEffectOutput(effect, "branch", branch)
 	setEffectOutput(effect, "worktree", worktreePath)
@@ -263,7 +262,7 @@ func (a *githubTrackerAdapter) openPullRequest(ctx context.Context, config githu
 	state.Execution.Metadata["pr_url"] = pullRequest.HTMLURL
 	state.Execution.Metadata["pr_state"] = normalizePullRequestState(pullRequest)
 	state.Execution.Metadata["github.pull_number"] = strconv.Itoa(pullRequest.Number)
-	state.Issue.Labels["pr_url"] = pullRequest.HTMLURL
+	ensureIssueDaemonState(state.Issue).PrUrl = pullRequest.HTMLURL
 	setEffectOutput(effect, "pr_url", pullRequest.HTMLURL)
 	setEffectOutput(effect, "pr_state", state.Execution.Metadata["pr_state"])
 	return nil
@@ -296,7 +295,7 @@ func (a *githubTrackerAdapter) pollPullRequestReview(ctx context.Context, config
 	} else {
 		delete(state.Execution.Metadata, "reviewed_by")
 	}
-	state.Issue.Labels["review_state"] = reviewState
+	ensureIssueDaemonState(state.Issue).ReviewState = reviewState
 	setEffectOutput(effect, "pr_state", state.Execution.Metadata["pr_state"])
 	setEffectOutput(effect, "review_state", reviewState)
 	return nil
@@ -328,7 +327,7 @@ func (a *githubTrackerAdapter) mergePullRequest(ctx context.Context, config gith
 	state.Execution.Metadata["integration_branch"] = baseBranch
 	state.Execution.Metadata["result"] = "merged"
 	state.Execution.Metadata["pr_state"] = "MERGED"
-	state.Issue.Labels["merge_commit"] = result.SHA
+	ensureIssueDaemonState(state.Issue).MergeCommit = result.SHA
 	setEffectOutput(effect, "merge_commit", result.SHA)
 	setEffectOutput(effect, "integration_branch", baseBranch)
 	setEffectOutput(effect, "result", "merged")
