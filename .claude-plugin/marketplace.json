@@ -1,0 +1,27 @@
+{
+  "name": "rein",
+  "plugins": [
+    {
+      "capabilities": {
+        "patch.apply": "true",
+        "pull_request": "true",
+        "shell.exec": "true"
+      },
+      "category": "codingAgent",
+      "daemonApiVersion": "rein.v1",
+      "description": "Claude Code coding-agent adapter bootstrap (separate repo).",
+      "name": "coding-claude-code",
+      "source": {
+        "ref": "main",
+        "repo": "earchibald/rein-adapter-claude-code",
+        "source": "github"
+      },
+      "version": "0.1.0"
+    }
+  ],
+  "signature": {
+    "algorithm": "ed25519",
+    "keyId": "rn23-marketplace-bootstrap",
+    "value": "FV/LN1bWx05WT6etZTMsJvhy1Esdgki9tHhXqwTXn5e95VcQzLKfRolxrqYTfdO9bdjlXxI0RRlGkoWbMu4EDQ=="
+  }
+}

@@ -39,12 +39,18 @@ type AdapterDiagnostic struct {
 }
 
 func Diagnose(root string, options DiscoveryOptions) Diagnostic {
-	options = options.withDefaults()
-
 	diagnostic := Diagnostic{
 		Root:            root,
 		MarketplacePath: filepath.Join(root, ".claude-plugin", "marketplace.json"),
 		RegistryReady:   true,
+	}
+
+	var err error
+	options, err = options.withRootDefaults(root)
+	if err != nil {
+		diagnostic.RegistryReady = false
+		diagnostic.Error = fmt.Sprintf("load trusted keys: %v", err)
+		return diagnostic
 	}
 
 	raw, err := os.ReadFile(diagnostic.MarketplacePath)

@@ -131,7 +131,11 @@ type pluginRecord struct {
 }
 
 func Load(root string, options DiscoveryOptions) (*Registry, error) {
-	options = options.withDefaults()
+	var err error
+	options, err = options.withRootDefaults(root)
+	if err != nil {
+		return nil, fmt.Errorf("load trusted keys: %w", err)
+	}
 
 	marketplacePath := filepath.Join(root, ".claude-plugin", "marketplace.json")
 	raw, err := os.ReadFile(marketplacePath)
