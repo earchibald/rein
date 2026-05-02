@@ -33,6 +33,7 @@ type doctorInstanceDiagnostic struct {
 	StateHome    string                 `json:"stateHome"`
 	RootDir      string                 `json:"rootDir"`
 	SocketPath   string                 `json:"socketPath"`
+	PIDPath      string                 `json:"pidPath"`
 	DatabasePath string                 `json:"databasePath"`
 	AutoStart    bool                   `json:"autoStart"`
 	Layout       doctorLayoutDiagnostic `json:"layout"`
@@ -167,6 +168,7 @@ func diagnoseInstance(layout instance.Layout) doctorInstanceDiagnostic {
 		StateHome:    layout.StateHome,
 		RootDir:      layout.RootDir,
 		SocketPath:   layout.SocketPath,
+		PIDPath:      layout.PIDPath,
 		DatabasePath: layout.DatabasePath,
 		AutoStart:    layout.AutoStartEnabled(),
 	}

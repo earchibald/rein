@@ -14,6 +14,7 @@ const (
 	rootDirName      = "rein"
 	instancesDirName = "instances"
 	socketFileName   = "grpc.sock"
+	pidFileName      = "daemon.pid"
 	storeFileName    = "rein.db"
 )
 
@@ -31,6 +32,7 @@ type Layout struct {
 	StateHome    string
 	RootDir      string
 	SocketPath   string
+	PIDPath      string
 	DatabasePath string
 }
 
@@ -80,6 +82,7 @@ func NewLayout(name, stateHome string) (Layout, error) {
 		StateHome:    stateHome,
 		RootDir:      rootDir,
 		SocketPath:   filepath.Join(rootDir, socketFileName),
+		PIDPath:      filepath.Join(rootDir, pidFileName),
 		DatabasePath: filepath.Join(rootDir, storeFileName),
 	}
 
@@ -120,6 +123,9 @@ func (l Layout) Validate() error {
 	}
 	if filepath.Clean(l.SocketPath) != filepath.Join(expectedRoot, socketFileName) {
 		return fmt.Errorf("instance: socket path %q does not match canonical layout", l.SocketPath)
+	}
+	if filepath.Clean(l.PIDPath) != filepath.Join(expectedRoot, pidFileName) {
+		return fmt.Errorf("instance: pid path %q does not match canonical layout", l.PIDPath)
 	}
 	if filepath.Clean(l.DatabasePath) != filepath.Join(expectedRoot, storeFileName) {
 		return fmt.Errorf("instance: database path %q does not match canonical layout", l.DatabasePath)

@@ -190,7 +190,7 @@ func TestAppCommandHelpUsesProtoComments(t *testing.T) {
 	}
 }
 
-func TestRootHelpListsDoctorDescribeAndTUICommands(t *testing.T) {
+func TestRootHelpListsStaticCommands(t *testing.T) {
 	t.Parallel()
 
 	var stdout, stderr bytes.Buffer
@@ -206,9 +206,11 @@ func TestRootHelpListsDoctorDescribeAndTUICommands(t *testing.T) {
 	}
 	output := stderr.String()
 	for _, want := range []string{
+		"backup\tCheckpoint SQLite WAL",
 		"doctor\tEmit JSON diagnostics",
 		"rein [global flags] describe-as=<format>",
 		"describe-as=<format>\tEmit a stable machine-consumable surface description.",
+		"restore\tAtomically replace the selected instance state from a backup copy.",
 		"tui\tTerminal UI over the canonical gRPC surface.",
 	} {
 		if !strings.Contains(output, want) {
