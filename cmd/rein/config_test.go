@@ -190,7 +190,7 @@ func TestAppCommandHelpUsesProtoComments(t *testing.T) {
 	}
 }
 
-func TestRootHelpListsDoctorCommand(t *testing.T) {
+func TestRootHelpListsDoctorAndDescribeCommands(t *testing.T) {
 	t.Parallel()
 
 	var stdout, stderr bytes.Buffer
@@ -204,8 +204,118 @@ func TestRootHelpListsDoctorCommand(t *testing.T) {
 	if err != flag.ErrHelp {
 		t.Fatalf("run() error = %v, want %v", err, flag.ErrHelp)
 	}
-
-	if got := stderr.String(); !strings.Contains(got, "doctor\tEmit JSON diagnostics") {
-		t.Fatalf("root help missing doctor command:\n%s", got)
+	output := stderr.String()
+	for _, want := range []string{
+		"doctor\tEmit JSON diagnostics",
+		"rein [global flags] describe-as=<format>",
+		"describe-as=<format>\tEmit a stable machine-consumable surface description.",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("help output missing %q\n%s", want, output)
+		}
 	}
+}
+
+func TestAppDescribeCLIOutput(t *testing.T) {
+	t.Parallel()
+
+	var stdout, stderr bytes.Buffer
+	app := newApp(&stdout, &stderr, func(string) (string, bool) { return "", false }, func() (string, error) {
+		return "/Users/tester", nil
+	}, func() (string, error) {
+		return "/repo", nil
+	})
+
+	if err := app.run([]string{"describe-as=cli"}); err != nil {
+		t.Fatalf("run() error = %v", err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"REIN SURFACE v1",
+		"COMMAND project list",
+		"full_method: /rein.v1.ProjectService/ListProjects",
+		"schema: rein.v1.PageRequest",
+		"GATEWAY STUB",
+		"MESSAGE rein.v1.ListProjectsRequest",
+		"ENUM rein.v1.ProjectStatus",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("describe-as=cli output missing %q\n%s", want, output)
+		}
+	}
+}
+
+func TestAppDescribeMCPOutput(t *testing.T) {
+	t.Parallel()
+
+	var stdout, stderr bytes.Buffer
+	app := newApp(&stdout, &stderr, func(string) (string, bool) { return "", false }, func() (string, error) {
+		return "/Users/tester", nil
+	}, func() (string, error) {
+		return "/repo", nil
+	})
+
+	if err := app.run([]string{"describe-as=mcp"}); err != nil {
+		t.Fatalf("run() error = %v", err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"surface: \"rein\"",
+		"- name: \"project_list\"",
+		"full_method: \"/rein.v1.ProjectService/ListProjects\"",
+		"path: \"/v2/projects\"",
+		"- name: \"rein.v1.ListProjectsRequest\"",
+		"- name: \"rein.v1.ProjectStatus\"",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("describe-as=mcp output missing %q\n%s", want, output)
+		}
+	}
+}
+
+func TestAppDescribeHelpAndInvalidFormat(t *testing.T) {
+	t.Parallel()
+
+	t.Run("help", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		app := newApp(&stdout, &stderr, func(string) (string, bool) { return "", false }, func() (string, error) {
+			return "/Users/tester", nil
+		}, func() (string, error) {
+			return "/repo", nil
+		})
+
+		err := app.run([]string{"describe-as", "--help"})
+		if err != flag.ErrHelp {
+			t.Fatalf("run() error = %v, want %v", err, flag.ErrHelp)
+		}
+		output := stderr.String()
+		for _, want := range []string{"Formats:", "cli", "mcp"} {
+			if !strings.Contains(output, want) {
+				t.Fatalf("describe help missing %q\n%s", want, output)
+			}
+		}
+	})
+
+	t.Run("invalid format", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		app := newApp(&stdout, &stderr, func(string) (string, bool) { return "", false }, func() (string, error) {
+			return "/Users/tester", nil
+		}, func() (string, error) {
+			return "/repo", nil
+		})
+
+		err := app.run([]string{"describe-as=bogus"})
+		if err == nil {
+			t.Fatal("run() error = nil, want non-nil")
+		}
+		if !strings.Contains(err.Error(), "supported: cli, mcp") {
+			t.Fatalf("run() error = %v, want supported formats", err)
+		}
+	})
 }
