@@ -1,0 +1,10 @@
+{
+  "name": "messaging-null",
+  "version": "0.1.0",
+  "description": "No-op managed messaging adapter stub.",
+  "category": "messaging",
+  "daemonApiVersion": "rein.v1",
+  "capabilities": {
+    "messaging.post": "true"
+  }
+}

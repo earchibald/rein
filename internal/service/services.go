@@ -16,7 +16,7 @@ type Set struct {
 }
 
 func NewSet() Set {
-	adapterServer, _ := NewAdapterServerFromRoot(".", adapter.DiscoveryOptions{})
+	adapterServer, _ := NewAdapterServerFromRoot(".", adapter.LocalDiscoveryOptions())
 	return Set{
 		Adapter:   adapterServer,
 		Execution: ExecutionServer{},
@@ -39,7 +39,7 @@ func NewSetFromRoot(root string, options adapter.DiscoveryOptions) (Set, error) 
 
 func (s Set) WithDefaults() Set {
 	if s.Adapter == nil {
-		adapterServer, _ := NewAdapterServerFromRoot(".", adapter.DiscoveryOptions{})
+		adapterServer, _ := NewAdapterServerFromRoot(".", adapter.LocalDiscoveryOptions())
 		s.Adapter = adapterServer
 	}
 	if s.Execution == nil {

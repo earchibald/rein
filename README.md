@@ -23,6 +23,11 @@ Modular orchestrator daemon — successor to op-obsidian. Go daemon + plural HMI
 - Request flags map 1:1 to top-level gRPC request fields. Scalar fields take plain values; message, repeated, and map fields take JSON blobs.
 - Responses are emitted as JSON using protobuf field names.
 
+## Adapter registry
+
+- The repo ships an unsigned local marketplace index at `.claude-plugin/marketplace.json` for built-in adapter discovery during local daemon and doctor runs.
+- `messaging-null` is a no-op notification adapter that advertises `messaging.post` so workflows can stay launchable until Slack and Discord adapters land.
+
 ## TUI
 
 - `rein tui` reads projects, issues, executions, workflow drilldown, and adapter capability state over the canonical gRPC API.
