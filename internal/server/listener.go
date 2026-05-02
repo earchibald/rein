@@ -11,7 +11,10 @@ import (
 	"runtime"
 )
 
-const defaultUnixSocketMode fs.FileMode = 0o600
+const (
+	defaultUnixSocketMode fs.FileMode = 0o600
+	defaultTCPAddress                 = "127.0.0.1:7777"
+)
 
 type ListenerConfig struct {
 	Network                string
@@ -22,19 +25,32 @@ type ListenerConfig struct {
 }
 
 func DefaultListenerConfig() ListenerConfig {
-	if runtime.GOOS == "linux" || runtime.GOOS == "darwin" {
-		return ListenerConfig{
-			Network:                "unix",
-			Address:                filepath.Join(os.TempDir(), "rein.sock"),
-			UnixSocketMode:         defaultUnixSocketMode,
-			RequirePeerCredentials: true,
-		}
-	}
+	network := DefaultListenerNetwork()
 
 	return ListenerConfig{
-		Network:        "tcp",
-		Address:        "127.0.0.1:7777",
-		UnixSocketMode: defaultUnixSocketMode,
+		Network:                network,
+		Address:                DefaultListenerAddress(network),
+		UnixSocketMode:         defaultUnixSocketMode,
+		RequirePeerCredentials: network == "unix",
+	}
+}
+
+func DefaultListenerNetwork() string {
+	if runtime.GOOS == "linux" || runtime.GOOS == "darwin" {
+		return "unix"
+	}
+
+	return "tcp"
+}
+
+func DefaultListenerAddress(network string) string {
+	switch network {
+	case "unix":
+		return filepath.Join(os.TempDir(), "rein.sock")
+	case "tcp":
+		return defaultTCPAddress
+	default:
+		return ""
 	}
 }
 
@@ -58,7 +74,10 @@ func (c ListenerConfig) withDefaults() ListenerConfig {
 		c.Network = defaults.Network
 	}
 	if c.Address == "" {
-		c.Address = defaults.Address
+		c.Address = DefaultListenerAddress(c.Network)
+		if c.Address == "" {
+			c.Address = defaults.Address
+		}
 	}
 	if c.UnixSocketMode == 0 {
 		c.UnixSocketMode = defaultUnixSocketMode

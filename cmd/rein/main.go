@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
+	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -18,22 +21,21 @@ func main() {
 }
 
 func run() int {
-	defaults := server.DefaultListenerConfig()
-
-	network := flag.String("grpc-network", defaults.Network, "listener network: tcp or unix")
-	address := flag.String("grpc-address", defaults.Address, "listener address or unix socket path")
-	requirePeerCredentials := flag.Bool("grpc-require-peer-credentials", defaults.RequirePeerCredentials, "require SO_PEERCRED same-UID authentication for unix sockets")
-	flag.Parse()
+	config, err := parseRuntimeConfig(os.Args[1:], os.Stderr, os.LookupEnv, os.UserHomeDir)
+	if err != nil {
+		return parseErrorExitCode(err, os.Stderr)
+	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	if err := config.instance.EnsureRootDir(); err != nil {
+		logger.Error("failed to prepare instance state directory", "error", err)
+		return 1
+	}
 
-	listener, err := server.Listen(server.ListenerConfig{
-		Network:                *network,
-		Address:                *address,
-		UnixSocketMode:         0o600,
-		RequirePeerCredentials: *requirePeerCredentials,
-		Logger:                 logger,
-	})
+	listenerConfig := config.listener
+	listenerConfig.Logger = logger
+
+	listener, err := server.Listen(listenerConfig)
 	if err != nil {
 		logger.Error("failed to create listener", "error", err)
 		return 1
@@ -52,7 +54,14 @@ func run() int {
 
 	runtime := server.New(server.Options{Services: services})
 
-	logger.Info("rein gRPC server starting", "network", *network, "address", listener.Addr().String())
+	logger.Info(
+		"rein gRPC server starting",
+		"instance", config.instance.Name,
+		"state_dir", config.instance.RootDir,
+		"network", listenerConfig.Network,
+		"address", listener.Addr().String(),
+		"auto_start", config.instance.AutoStartEnabled(),
+	)
 	logger.Info(
 		"rein HTTP/SSE gateway v2 stub ready",
 		"routes", len(runtime.Gateway().Routes()),
@@ -68,4 +77,13 @@ func run() int {
 	}
 
 	return 0
+}
+
+func parseErrorExitCode(err error, stderr io.Writer) int {
+	if errors.Is(err, flag.ErrHelp) {
+		return 0
+	}
+
+	_, _ = fmt.Fprintln(stderr, err)
+	return 2
 }

@@ -1,6 +1,16 @@
 # rein
 Modular orchestrator daemon — successor to op-obsidian. Go daemon + plural HMIs (CLI/TUI) + plugin marketplace.
 
+## Instance state layout
+
+- Rein keeps per-instance state under `~/.local/state/rein/instances/<name>/` by default, or under `$XDG_STATE_HOME/rein/instances/<name>/` when `XDG_STATE_HOME` is set.
+- The active instance is selected with `--instance <name>` or `REIN_INSTANCE=<name>`; when neither is set, rein uses the `live` instance.
+- Only the `live` instance is eligible for future auto-start behavior. Other instances must be started explicitly.
+- The current reserved layout is:
+  - `grpc.sock` — default unix gRPC listener socket for that instance.
+  - `rein.db` — canonical SQLite path reserved for that instance's persisted state.
+- `rein doctor` will validate that commands and on-disk state follow this canonical layout in a future issue.
+
 ## Development
 
 - `just proto` lints the Buf workspace and regenerates the committed Go protobuf/gRPC stubs.
