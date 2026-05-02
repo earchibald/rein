@@ -33,6 +33,7 @@ In another terminal, inspect health and the current API surface:
 ./bin/rein project list
 ./bin/rein issue list
 ./bin/rein describe-as=cli
+./bin/rein version
 ```
 
 Launch the terminal UI against that same daemon:
@@ -74,6 +75,11 @@ cargo install mdbook --locked
 mdbook serve docs
 ```
 
+## Releases
+
+- Pushing a CalVer tag in the form `YYYY.MM.PATCH` triggers the GitHub release workflow, which reruns CI, builds release archives, publishes a GitHub Release, and records GitHub artifact attestations for the uploaded archives.
+- The release pipeline does not attempt platform-native code signing or notarization. Those remain future follow-ups that require Apple/Windows signing material and any associated notarization credentials.
+
 ## Current limitations to keep in mind
 
 - The repository marketplace can advertise remote adapters today, but remote managed execution is still an explicit stub until the external adapter bridge lands.
@@ -107,6 +113,7 @@ mdbook serve docs
 - Use `rein describe-as=cli` for a manual-style, machine-consumable description of the CLI/gRPC surface and reachable protobuf schemas.
 - Use `rein describe-as=mcp` for a stable YAML description of commands, flags, gateway stub routes, and schemas suitable for wrapper/skill tooling.
 - Use `rein tui` for the terminal-native HMI over that same daemon surface.
+- Use `rein version` to print the current CalVer, commit/build metadata, and local-vs-release provenance.
 - Service commands mirror the protobuf API: `rein project|issue|execution|workflow|adapter <verb>`.
 - Top-level request flags map 1:1 to top-level protobuf request fields and use the protobuf field names (for example `--project_id`).
 - Scalar fields take plain values; message, repeated, and map fields take JSON blobs.

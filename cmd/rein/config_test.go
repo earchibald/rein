@@ -216,6 +216,8 @@ func TestRootHelpListsStaticCommands(t *testing.T) {
 		"describe-as=<format>\tEmit a stable machine-consumable surface description.",
 		"restore\tAtomically replace the selected instance state from a backup copy.",
 		"tui\tTerminal UI over the canonical gRPC surface.",
+		"rein version [--json]",
+		"version\tPrint the CLI version and embedded build provenance.",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("help output missing %q\n%s", want, output)

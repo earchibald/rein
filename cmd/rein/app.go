@@ -103,6 +103,8 @@ func (a *app) run(args []string) error {
 		return a.runRestore(root, remaining[1:])
 	case "tui":
 		return a.runTUI(root, remaining[1:])
+	case "version":
+		return a.runVersion(remaining[1:])
 	default:
 		if strings.HasPrefix(remaining[0], "describe-as=") {
 			return a.runDescribe(remaining)
@@ -555,6 +557,7 @@ func (a *app) printRootHelp() {
 	fmt.Fprintln(a.stderr, "  rein [global flags] describe-as=<format>")
 	fmt.Fprintln(a.stderr, "  rein [global flags] restore [flags] <source>")
 	fmt.Fprintln(a.stderr, "  rein [global flags] tui")
+	fmt.Fprintln(a.stderr, "  rein version [--json]")
 	fmt.Fprintln(a.stderr)
 	fmt.Fprintln(a.stderr, "Global flags:")
 	for _, flag := range globalFlagDescriptions() {
@@ -588,6 +591,7 @@ func (a *app) printRootHelp() {
 	fmt.Fprintln(a.stderr, "  doctor\tEmit JSON diagnostics for daemon health and local instance readiness.")
 	fmt.Fprintln(a.stderr, "  describe-as=<format>\tEmit a stable machine-consumable surface description.")
 	fmt.Fprintln(a.stderr, "  restore\tAtomically replace the selected instance state from a backup copy.")
+	fmt.Fprintln(a.stderr, "  version\tPrint the CLI version and embedded build provenance.")
 }
 
 func (a *app) printBackupHelp() {

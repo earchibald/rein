@@ -7,13 +7,15 @@ on:
     branches: [main]
 
 jobs:
-  build-lint-test:
-    name: Build, Lint & Test
+  ci-ubuntu:
+    name: CI (ubuntu)
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -24,21 +26,30 @@ jobs:
       - name: Install just
         uses: taiki-e/install-action@just
 
-      - name: Lint and generate protobuf stubs
-        run: |
-          just proto
-          git diff --exit-code
+      - name: Install mdBook
+        uses: taiki-e/install-action@mdbook
 
-      - name: Build
-        run: go build ./...
+      - name: Run CI-equivalent checks
+        run: just ci
 
-      - name: Vet
-        run: go vet ./...
+  ci-macos:
+    name: CI (macOS)
+    runs-on: macos-latest
 
-      - name: Test
-        run: just test-race
-
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          version: v2.12.1
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install just
+        uses: taiki-e/install-action@just
+
+      - name: Run macOS-targeted checks
+        run: just ci-macos
