@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -32,11 +33,13 @@ func TestLoadLocalMarketplacePlugin(t *testing.T) {
 	}
 }
 
-func TestApplyCreatesAndUpdatesDashboards(t *testing.T) {
+func TestApplyCreatesSkipsAndUpdatesDashboards(t *testing.T) {
 	t.Parallel()
 
 	root := writeDashboardFixture(t, fixtureOptions{})
 	var stored []sigNozDashboard
+	var createRequests int
+	var updateRequests int
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get(sigNozAPIKeyHeader); got != "secret" {
@@ -46,6 +49,7 @@ func TestApplyCreatesAndUpdatesDashboards(t *testing.T) {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/dashboards":
 			_ = json.NewEncoder(w).Encode(stored)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/dashboards":
+			createRequests++
 			var payload map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 				t.Fatalf("Decode(POST body) error = %v", err)
@@ -55,6 +59,7 @@ func TestApplyCreatesAndUpdatesDashboards(t *testing.T) {
 			w.WriteHeader(http.StatusCreated)
 			_ = json.NewEncoder(w).Encode(dashboard)
 		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/dashboards/created-1":
+			updateRequests++
 			var payload map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 				t.Fatalf("Decode(PUT body) error = %v", err)
@@ -81,6 +86,9 @@ func TestApplyCreatesAndUpdatesDashboards(t *testing.T) {
 	if len(stored) != 1 || !hasTag(stored[0].Data["tags"], "rein-dashboards:rein-daemon-otlp") {
 		t.Fatalf("stored dashboard tags = %+v", stored)
 	}
+	if !hasTagPrefix(stored[0].Data["tags"], dashboardHashTagPrefix) {
+		t.Fatalf("stored dashboard hash tags = %+v, want %q prefix", stored[0].Data["tags"], dashboardHashTagPrefix)
+	}
 
 	second, err := Apply(context.Background(), root, ApplyOptions{
 		Plugin:  DefaultPluginName,
@@ -90,8 +98,76 @@ func TestApplyCreatesAndUpdatesDashboards(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Apply() second error = %v", err)
 	}
-	if got, want := second.Updated, []string{"created-1"}; !slices.Equal(got, want) {
-		t.Fatalf("second.Updated = %v, want %v", got, want)
+	if got, want := second.Skipped, []string{"created-1"}; !slices.Equal(got, want) {
+		t.Fatalf("second.Skipped = %v, want %v", got, want)
+	}
+	if updateRequests != 0 {
+		t.Fatalf("updateRequests after unchanged apply = %d, want 0", updateRequests)
+	}
+
+	writeJSONFile(t, filepath.Join(root, "plugins", "rein-dashboards", "signoz", "rein-daemon-otlp.json"), map[string]any{
+		"title":   "Rein Daemon OTLP",
+		"version": "v6",
+		"widgets": []any{map[string]any{"id": "cpu"}},
+		"layout":  []any{},
+	})
+
+	third, err := Apply(context.Background(), root, ApplyOptions{
+		Plugin:  DefaultPluginName,
+		BaseURL: server.URL,
+		APIKey:  "secret",
+	})
+	if err != nil {
+		t.Fatalf("Apply() third error = %v", err)
+	}
+	if got, want := third.Updated, []string{"created-1"}; !slices.Equal(got, want) {
+		t.Fatalf("third.Updated = %v, want %v", got, want)
+	}
+	if createRequests != 1 {
+		t.Fatalf("createRequests = %d, want 1", createRequests)
+	}
+	if updateRequests != 1 {
+		t.Fatalf("updateRequests after changed apply = %d, want 1", updateRequests)
+	}
+	if got := stored[0].Data["version"]; got != "v6" {
+		t.Fatalf("stored version = %v, want v6", got)
+	}
+}
+
+func TestApplySkipsLegacyDashboardsWhenPayloadMatches(t *testing.T) {
+	t.Parallel()
+
+	root := writeDashboardFixture(t, fixtureOptions{})
+	payload, err := loadAsset(filepath.Join(root, "plugins", "rein-dashboards", "signoz", "rein-daemon-otlp.json"), Asset{
+		ID:    "rein-daemon-otlp",
+		Title: "Rein Daemon OTLP",
+	})
+	if err != nil {
+		t.Fatalf("loadAsset() error = %v", err)
+	}
+	payload["tags"] = []any{"rein-dashboards:rein-daemon-otlp", "rein-dashboards", "rein"}
+	stored := []sigNozDashboard{{ID: "existing-1", Data: payload}}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/dashboards":
+			_ = json.NewEncoder(w).Encode(stored)
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	result, err := Apply(context.Background(), root, ApplyOptions{
+		Plugin:  DefaultPluginName,
+		BaseURL: server.URL,
+		APIKey:  "secret",
+	})
+	if err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	if got, want := result.Skipped, []string{"existing-1"}; !slices.Equal(got, want) {
+		t.Fatalf("result.Skipped = %v, want %v", got, want)
 	}
 }
 
@@ -195,4 +271,22 @@ func writeJSONFile(t *testing.T, path string, value any) {
 	if err := os.WriteFile(path, raw, 0o644); err != nil {
 		t.Fatalf("WriteFile(%q) error = %v", path, err)
 	}
+}
+
+func hasTagPrefix(current any, prefix string) bool {
+	switch value := current.(type) {
+	case []string:
+		for _, item := range value {
+			if strings.HasPrefix(item, prefix) {
+				return true
+			}
+		}
+	case []any:
+		for _, item := range value {
+			if tag, ok := item.(string); ok && strings.HasPrefix(tag, prefix) {
+				return true
+			}
+		}
+	}
+	return false
 }

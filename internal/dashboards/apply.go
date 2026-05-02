@@ -3,6 +3,8 @@ package dashboards
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,6 +20,8 @@ import (
 // #nosec G101 -- this is the public header name SigNoz expects, not a credential.
 const sigNozAPIKeyHeader = "SIGNOZ-API-KEY"
 
+const dashboardHashTagPrefix = "rein-dashboards-sha256:"
+
 type ApplyOptions struct {
 	Plugin     string
 	BaseURL    string
@@ -30,6 +34,7 @@ type ApplyResult struct {
 	Provider string   `json:"provider"`
 	Created  []string `json:"created"`
 	Updated  []string `json:"updated"`
+	Skipped  []string `json:"skipped"`
 }
 
 type sigNozDashboard struct {
@@ -83,8 +88,8 @@ func Apply(ctx context.Context, root string, options ApplyOptions) (ApplyResult,
 			return ApplyResult{}, err
 		}
 
-		existingID := findDashboardID(existing, asset)
-		if existingID == "" {
+		existingDashboard, ok := findDashboard(existing, asset)
+		if !ok {
 			created, err := client.createDashboard(ctx, payload)
 			if err != nil {
 				return ApplyResult{}, fmt.Errorf("create dashboard %q: %w", asset.ID, err)
@@ -94,13 +99,22 @@ func Apply(ctx context.Context, root string, options ApplyOptions) (ApplyResult,
 			continue
 		}
 
-		updated, err := client.updateDashboard(ctx, existingID, payload)
+		match, err := dashboardsMatch(existingDashboard.Data, payload)
+		if err != nil {
+			return ApplyResult{}, fmt.Errorf("compare dashboard %q: %w", asset.ID, err)
+		}
+		if match {
+			result.Skipped = append(result.Skipped, existingDashboard.ID)
+			continue
+		}
+
+		updated, err := client.updateDashboard(ctx, existingDashboard.ID, payload)
 		if err != nil {
 			return ApplyResult{}, fmt.Errorf("update dashboard %q: %w", asset.ID, err)
 		}
 		result.Updated = append(result.Updated, updated.ID)
 		for index := range existing {
-			if existing[index].ID == existingID {
+			if existing[index].ID == existingDashboard.ID {
 				existing[index] = updated
 				break
 			}
@@ -108,6 +122,7 @@ func Apply(ctx context.Context, root string, options ApplyOptions) (ApplyResult,
 	}
 
 	slices.Sort(result.Created)
+	slices.Sort(result.Skipped)
 	slices.Sort(result.Updated)
 	return result, nil
 }
@@ -139,28 +154,25 @@ func loadAsset(path string, asset Asset) (map[string]any, error) {
 		}
 	}
 	payload["tags"] = ensureDashboardTags(payload["tags"], asset.ID)
+	hashTag, err := dashboardHashTag(payload)
+	if err != nil {
+		return nil, fmt.Errorf("fingerprint dashboard asset %q: %w", asset.ID, err)
+	}
+	payload["tags"] = ensureDashboardTags(payload["tags"], asset.ID, hashTag)
 	return payload, nil
 }
 
-func ensureDashboardTags(current any, assetID string) []string {
+func ensureDashboardTags(current any, assetID string, extraTags ...string) []string {
 	tags := map[string]bool{}
-	switch value := current.(type) {
-	case []string:
-		for _, item := range value {
-			if item != "" {
-				tags[item] = true
-			}
-		}
-	case []any:
-		for _, item := range value {
-			if tag, ok := item.(string); ok && tag != "" {
-				tags[tag] = true
-			}
-		}
-	}
+	appendDashboardTags(tags, current)
 
 	for _, tag := range []string{"rein", "rein-dashboards", "rein-dashboards:" + assetID} {
 		tags[tag] = true
+	}
+	for _, tag := range extraTags {
+		if normalized := strings.TrimSpace(tag); normalized != "" {
+			tags[normalized] = true
+		}
 	}
 
 	ordered := make([]string, 0, len(tags))
@@ -171,21 +183,115 @@ func ensureDashboardTags(current any, assetID string) []string {
 	return ordered
 }
 
-func findDashboardID(existing []sigNozDashboard, asset Asset) string {
+func appendDashboardTags(tags map[string]bool, current any) {
+	switch value := current.(type) {
+	case []string:
+		for _, item := range value {
+			appendDashboardTag(tags, item)
+		}
+	case []any:
+		for _, item := range value {
+			if tag, ok := item.(string); ok {
+				appendDashboardTag(tags, tag)
+			}
+		}
+	}
+}
+
+func appendDashboardTag(tags map[string]bool, tag string) {
+	normalized := strings.TrimSpace(tag)
+	if normalized == "" || strings.HasPrefix(normalized, dashboardHashTagPrefix) {
+		return
+	}
+	tags[normalized] = true
+}
+
+func dashboardHashTag(payload map[string]any) (string, error) {
+	normalized, err := normalizedDashboardPayload(payload)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(normalized)
+	return dashboardHashTagPrefix + hex.EncodeToString(sum[:]), nil
+}
+
+func dashboardsMatch(existing, desired map[string]any) (bool, error) {
+	expectedHashTag, err := dashboardHashTag(desired)
+	if err != nil {
+		return false, err
+	}
+	if hasTag(existing["tags"], expectedHashTag) {
+		return true, nil
+	}
+
+	existingPayload, err := normalizedDashboardPayload(existing)
+	if err != nil {
+		return false, err
+	}
+	desiredPayload, err := normalizedDashboardPayload(desired)
+	if err != nil {
+		return false, err
+	}
+	return bytes.Equal(existingPayload, desiredPayload), nil
+}
+
+func normalizedDashboardPayload(payload map[string]any) ([]byte, error) {
+	return json.Marshal(normalizeDashboardValue(payload, ""))
+}
+
+func normalizeDashboardValue(value any, field string) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		normalized := make(map[string]any, len(typed))
+		for key, item := range typed {
+			normalized[key] = normalizeDashboardValue(item, key)
+		}
+		return normalized
+	case []string:
+		if field == "tags" {
+			return normalizeDashboardTags(typed)
+		}
+		return append([]string(nil), typed...)
+	case []any:
+		if field == "tags" {
+			return normalizeDashboardTags(typed)
+		}
+		normalized := make([]any, 0, len(typed))
+		for _, item := range typed {
+			normalized = append(normalized, normalizeDashboardValue(item, ""))
+		}
+		return normalized
+	default:
+		return value
+	}
+}
+
+func normalizeDashboardTags(current any) []string {
+	tags := map[string]bool{}
+	appendDashboardTags(tags, current)
+	ordered := make([]string, 0, len(tags))
+	for tag := range tags {
+		ordered = append(ordered, tag)
+	}
+	slices.Sort(ordered)
+	return ordered
+}
+
+func findDashboard(existing []sigNozDashboard, asset Asset) (sigNozDashboard, bool) {
 	marker := "rein-dashboards:" + asset.ID
 	title := strings.TrimSpace(asset.Title)
 	for _, dashboard := range existing {
 		if hasTag(dashboard.Data["tags"], marker) {
-			return dashboard.ID
+			return dashboard, true
 		}
 		if title == "" {
 			continue
 		}
 		if dashboardTitle, _ := dashboard.Data["title"].(string); strings.TrimSpace(dashboardTitle) == title {
-			return dashboard.ID
+			return dashboard, true
 		}
 	}
-	return ""
+	return sigNozDashboard{}, false
 }
 
 func hasTag(current any, want string) bool {

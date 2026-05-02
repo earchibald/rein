@@ -125,7 +125,7 @@ SIGNOZ_API_KEY=replace-me \
 ./bin/rein dashboards apply
 ```
 
-The dashboards marketplace currently points at the bundled local `rein-dashboards` plugin under `plugins/rein-dashboards/`.
+The dashboards marketplace currently points at the bundled local `rein-dashboards` plugin under `plugins/rein-dashboards/`. Repeat runs skip unchanged bundled dashboards and report `createdIds`, `updatedIds`, and `skippedIds` in the JSON response.
 
 ## Current limits
 

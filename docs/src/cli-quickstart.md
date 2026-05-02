@@ -156,7 +156,7 @@ Equivalent flags are also available:
   --signoz-api-key replace-me
 ```
 
-Today this command installs the bundled local dashboards plugin. Remote dashboard bootstrap is not wired into the CLI yet.
+The JSON response reports which dashboards were `createdIds`, `updatedIds`, or `skippedIds`; unchanged bundled dashboards are skipped on repeat runs. Today this command installs the bundled local dashboards plugin. Remote dashboard bootstrap is not wired into the CLI yet.
 
 ## 9. When to switch to the TUI
 

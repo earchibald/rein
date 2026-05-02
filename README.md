@@ -55,6 +55,8 @@ SIGNOZ_API_KEY=replace-me \
 ./bin/rein dashboards apply
 ```
 
+Re-running the command skips unchanged bundled dashboards and reports `createdIds`, `updatedIds`, and `skippedIds` in the JSON output.
+
 ## Documentation
 
 Longer user guides live under `docs/` and can be read directly in the repo or served as an mdBook:
@@ -135,7 +137,7 @@ mdbook serve docs
 
 - The reference dashboards ship from a dedicated marketplace index at `.claude-plugin/dashboards-marketplace.json`.
 - The bundled local plugin lives at `plugins/rein-dashboards/.claude-plugin/plugin.json` and currently targets SigNoz with `plugins/rein-dashboards/signoz/rein-daemon-otlp.json`.
-- `rein dashboards apply` resolves that marketplace entry from the repository root, then creates or updates dashboards in SigNoz using the `SIGNOZ-API-KEY` header.
+- `rein dashboards apply` resolves that marketplace entry from the repository root, then creates, updates, or skips dashboards in SigNoz using the `SIGNOZ-API-KEY` header.
 - The loader accepts the same future-facing local/GitHub/URL source shape as the adapter marketplace, but remote dashboard bootstrap remains an explicit follow-up.
 
 ## TUI

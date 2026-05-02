@@ -230,6 +230,7 @@ type dashboardsApplyOutput struct {
 	Repository string   `json:"repositoryRoot"`
 	CreatedIDs []string `json:"createdIds"`
 	UpdatedIDs []string `json:"updatedIds"`
+	SkippedIDs []string `json:"skippedIds"`
 }
 
 func (a *app) runDashboards(args []string) error {
@@ -266,6 +267,7 @@ func (a *app) applyDashboards(config dashboardsApplyConfig) error {
 		Repository: config.RootPath,
 		CreatedIDs: result.Created,
 		UpdatedIDs: result.Updated,
+		SkippedIDs: result.Skipped,
 	})
 }
 
