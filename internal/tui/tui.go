@@ -14,13 +14,17 @@ import (
 	reinv1 "github.com/earchibald/rein/gen/go/rein/v1"
 )
 
-const defaultRefreshInterval = 5 * time.Second
+const (
+	defaultRefreshInterval       = 30 * time.Second
+	defaultDetailRefreshInterval = 5 * time.Second
+)
 
 type Options struct {
-	InstanceName    string
-	Network         string
-	Address         string
-	RefreshInterval time.Duration
+	InstanceName          string
+	Network               string
+	Address               string
+	RefreshInterval       time.Duration
+	DetailRefreshInterval time.Duration
 }
 
 type dataLoader interface {
@@ -57,6 +61,7 @@ type detailLoadedMsg struct {
 }
 
 type refreshTickMsg time.Time
+type detailRefreshTickMsg time.Time
 
 type focusArea int
 
@@ -83,6 +88,8 @@ type model struct {
 	detail    *reinv1.InspectExecutionResponse
 	detailErr string
 
+	detailScrollOffset int
+
 	selectedProjectID   string
 	selectedIssueID     string
 	selectedExecutionID string
@@ -107,6 +114,9 @@ func newGRPCLoader(conn grpc.ClientConnInterface) *grpcLoader {
 func newModel(loader dataLoader, opts Options) model {
 	if opts.RefreshInterval <= 0 {
 		opts.RefreshInterval = defaultRefreshInterval
+	}
+	if opts.DetailRefreshInterval <= 0 {
+		opts.DetailRefreshInterval = defaultDetailRefreshInterval
 	}
 	return model{
 		loader:        loader,
@@ -172,7 +182,7 @@ func (l *grpcLoader) loadDetail(ctx context.Context, executionID string) (*reinv
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(m.loadBaseCmd(), m.refreshCmd())
+	return tea.Batch(m.loadBaseCmd(), m.refreshCmd(), m.detailRefreshCmd())
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -192,16 +202,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		previousExecutionID := m.selectedExecutionID
 		m.syncSelection()
 		if m.selectedExecutionID != previousExecutionID {
-			m.detail = nil
-			m.detailErr = ""
+			m.resetDetailState()
 		}
-		if m.selectedExecutionID != "" {
+		m.clampDetailScroll()
+		if m.selectedExecutionID != "" && (m.selectedExecutionID != previousExecutionID || (!m.loadingDetail && (m.detail == nil || m.detailErr != ""))) {
 			m.loadingDetail = true
 			return m, m.loadDetailCmd(m.selectedExecutionID)
 		}
-		m.loadingDetail = false
-		m.detail = nil
-		m.detailErr = ""
+		if m.selectedExecutionID == "" {
+			m.resetDetailState()
+		}
 		return m, nil
 	case detailLoadedMsg:
 		if msg.id != m.selectedExecutionID {
@@ -211,14 +221,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.detail = nil
 			m.detailErr = msg.err.Error()
+			m.clampDetailScroll()
 			return m, nil
 		}
 		m.detail = msg.detail
 		m.detailErr = ""
+		m.clampDetailScroll()
 		return m, nil
 	case refreshTickMsg:
+		if m.loadingBase {
+			return m, m.refreshCmd()
+		}
 		m.loadingBase = true
 		return m, tea.Batch(m.loadBaseCmd(), m.refreshCmd())
+	case detailRefreshTickMsg:
+		if m.selectedExecutionID == "" || m.loadingDetail {
+			return m, m.detailRefreshCmd()
+		}
+		m.loadingDetail = true
+		return m, tea.Batch(m.loadDetailCmd(m.selectedExecutionID), m.detailRefreshCmd())
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
@@ -237,14 +258,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "enter":
 			m.showDrilldown = !m.showDrilldown
+			m.detailScrollOffset = 0
 			return m, nil
 		case "r":
 			m.loadingBase = true
-			return m, m.loadBaseCmd()
+			cmds := []tea.Cmd{m.loadBaseCmd()}
+			if m.selectedExecutionID != "" {
+				m.loadingDetail = true
+				cmds = append(cmds, m.loadDetailCmd(m.selectedExecutionID))
+			}
+			return m, tea.Batch(cmds...)
 		case "up", "k":
 			return m.moveSelection(-1)
 		case "down", "j":
 			return m.moveSelection(1)
+		case "pgup", "ctrl+u":
+			return m.scrollDetail(-m.detailScrollStep())
+		case "pgdown", "ctrl+d":
+			return m.scrollDetail(m.detailScrollStep())
+		case "home":
+			m.detailScrollOffset = 0
+			return m, nil
+		case "end":
+			m.detailScrollOffset = m.maxDetailScrollOffset()
+			return m, nil
 		}
 	}
 	return m, nil
@@ -262,7 +299,7 @@ func (m model) View() string {
 
 	header := headerStyle.Render(fmt.Sprintf("rein tui • instance %s • %s %s", fallback(m.opts.InstanceName, "live"), fallback(m.opts.Network, "unix"), fallback(m.opts.Address, "default")))
 	summary := summaryStyle.Render(m.summaryLine())
-	footer := footerStyle.Render("tab focus • ↑↓ move • enter compact/expanded • r refresh • q quit")
+	footer := footerStyle.Render("tab focus • ↑↓ move • pgup/pgdn scroll • enter compact/expanded • r refresh • q quit")
 	bodyHeight := maxInt(12, height-4)
 	leftWidth := minInt(44, maxInt(32, width/3))
 	rightWidth := maxInt(40, width-leftWidth-1)
@@ -296,6 +333,10 @@ func (m model) refreshCmd() tea.Cmd {
 	return tea.Tick(m.opts.RefreshInterval, func(t time.Time) tea.Msg { return refreshTickMsg(t) })
 }
 
+func (m model) detailRefreshCmd() tea.Cmd {
+	return tea.Tick(m.opts.DetailRefreshInterval, func(t time.Time) tea.Msg { return detailRefreshTickMsg(t) })
+}
+
 func (m model) moveSelection(delta int) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch m.focus {
@@ -303,8 +344,7 @@ func (m model) moveSelection(delta int) (tea.Model, tea.Cmd) {
 		m.selectedProjectID = moveID(m.selectedProjectID, projectIDs(m.base.projects), delta)
 		m.selectedIssueID = ""
 		m.selectedExecutionID = ""
-		m.detail = nil
-		m.detailErr = ""
+		m.resetDetailState()
 		m.syncSelection()
 		if m.selectedExecutionID != "" {
 			m.loadingDetail = true
@@ -313,8 +353,7 @@ func (m model) moveSelection(delta int) (tea.Model, tea.Cmd) {
 	case focusIssues:
 		m.selectedIssueID = moveID(m.selectedIssueID, issueIDs(m.filteredIssues()), delta)
 		m.selectedExecutionID = ""
-		m.detail = nil
-		m.detailErr = ""
+		m.resetDetailState()
 		m.syncSelection()
 		if m.selectedExecutionID != "" {
 			m.loadingDetail = true
@@ -325,13 +364,10 @@ func (m model) moveSelection(delta int) (tea.Model, tea.Cmd) {
 		previous := m.selectedExecutionID
 		m.selectedExecutionID = moveID(m.selectedExecutionID, ids, delta)
 		if previous != m.selectedExecutionID {
-			m.detail = nil
-			m.detailErr = ""
+			m.resetDetailState()
 			if m.selectedExecutionID != "" {
 				m.loadingDetail = true
 				cmd = m.loadDetailCmd(m.selectedExecutionID)
-			} else {
-				m.loadingDetail = false
 			}
 		}
 	}
@@ -421,8 +457,12 @@ func (m model) renderNavigator(width, height int) string {
 }
 
 func (m model) renderDetail(width, height int) string {
+	return renderScrollablePanel("Overview", m.detailBodyLines(), width, height, false, m.detailScrollOffset)
+}
+
+func (m model) detailBodyLines() []string {
 	if m.baseErr != "" && len(m.base.projects) == 0 && len(m.base.issues) == 0 && len(m.base.executions) == 0 {
-		return renderPanel("Overview", "Failed to load daemon state:\n\n"+m.baseErr, width, height, false)
+		return []string{"Failed to load daemon state:", "", m.baseErr}
 	}
 
 	lines := []string{
@@ -452,16 +492,19 @@ func (m model) renderDetail(width, height int) string {
 	if execution := m.selectedExecution(); execution != nil {
 		lines = append(lines, "", "Execution", fmt.Sprintf("  %s • %s", execution.GetId(), statusText(execution.GetStatus().String())), fmt.Sprintf("  requested by %s", fallback(execution.GetRequestedBy(), "unknown")))
 		switch {
-		case m.loadingDetail:
+		case m.loadingDetail && m.detail == nil:
 			lines = append(lines, "", "Drilldown loading…")
 		case m.detailErr != "":
 			lines = append(lines, "", "Drilldown unavailable", "  "+m.detailErr)
 		case m.detail != nil:
+			if m.loadingDetail {
+				lines = append(lines, "", "Drilldown refreshing…")
+			}
 			lines = append(lines, m.executionDetailLines()...)
 		}
 	}
 
-	return renderPanel("Overview", strings.Join(lines, "\n"), width, height, false)
+	return lines
 }
 
 func (m model) workflowStatusLines(workflow *reinv1.Workflow) []string {
@@ -649,6 +692,14 @@ func renderPanel(title, body string, width, height int, focused bool) string {
 	return style.Render(titleStyle.Render(title) + "\n" + clipLines(body, maxInt(1, height-2), width-4))
 }
 
+func renderScrollablePanel(title string, lines []string, width, height int, focused bool, offset int) string {
+	style := panelStyle.Width(width).Height(height)
+	if focused {
+		style = focusedPanelStyle.Width(width).Height(height)
+	}
+	return style.Render(titleStyle.Render(title) + "\n" + scrollLines(lines, maxInt(1, height-2), width-4, offset))
+}
+
 func effectSummary(effect *reinv1.ExecutionSideEffect) string {
 	parts := []string{fallback(effect.GetPhaseName(), effect.GetPhaseId()), strings.ToLower(effect.GetStatus()), effect.GetOperation()}
 	if outputs := sortedMapLines(effect.GetOutputs()); len(outputs) > 0 {
@@ -723,11 +774,100 @@ func clipLines(body string, height, width int) string {
 		lines = lines[:height]
 	}
 	for i, line := range lines {
-		if lipgloss.Width(line) > width && width > 1 {
-			lines[i] = lipgloss.NewStyle().MaxWidth(width).Render(line)
-		}
+		lines[i] = fitLine(line, width)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func scrollLines(lines []string, height, width, offset int) string {
+	if height <= 0 {
+		return ""
+	}
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	offset = clampInt(offset, 0, maxScrollOffset(len(lines), height))
+	contentHeight := height
+	topOverflow := offset > 0
+	bottomOverflow := offset < maxScrollOffset(len(lines), height)
+	if topOverflow {
+		contentHeight--
+	}
+	if bottomOverflow {
+		contentHeight--
+	}
+	if contentHeight < 0 {
+		contentHeight = 0
+	}
+	end := minInt(len(lines), offset+contentHeight)
+	visible := make([]string, 0, height)
+	if topOverflow {
+		visible = append(visible, fitLine(overflowStyle.Render(fmt.Sprintf("↑ %d above", offset)), width))
+	}
+	for _, line := range lines[offset:end] {
+		visible = append(visible, fitLine(line, width))
+	}
+	if bottomOverflow {
+		visible = append(visible, fitLine(overflowStyle.Render(fmt.Sprintf("↓ %d more", len(lines)-end)), width))
+	}
+	return strings.Join(visible, "\n")
+}
+
+func fitLine(line string, width int) string {
+	if lipgloss.Width(line) > width && width > 1 {
+		return lipgloss.NewStyle().MaxWidth(width).Render(line)
+	}
+	return line
+}
+
+func maxScrollOffset(totalLines, height int) int {
+	if height <= 0 || totalLines <= height {
+		return 0
+	}
+	return totalLines - height + 1
+}
+
+func clampInt(value, minValue, maxValue int) int {
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
+}
+
+func (m *model) resetDetailState() {
+	m.loadingDetail = false
+	m.detail = nil
+	m.detailErr = ""
+	m.detailScrollOffset = 0
+}
+
+func (m *model) clampDetailScroll() {
+	m.detailScrollOffset = clampInt(m.detailScrollOffset, 0, m.maxDetailScrollOffset())
+}
+
+func (m model) maxDetailScrollOffset() int {
+	return maxScrollOffset(len(m.detailBodyLines()), m.detailViewportHeight())
+}
+
+func (m model) detailViewportHeight() int {
+	height := m.height
+	if height <= 0 {
+		height = 36
+	}
+	return maxInt(1, maxInt(12, height-4)-2)
+}
+
+func (m model) detailScrollStep() int {
+	return maxInt(1, m.detailViewportHeight()-2)
+}
+
+func (m model) scrollDetail(delta int) (tea.Model, tea.Cmd) {
+	m.detailScrollOffset += delta
+	m.clampDetailScroll()
+	return m, nil
 }
 
 func projectIDs(projects []*reinv1.Project) []string {
@@ -858,4 +998,5 @@ var (
 	selectedStyle     = lipgloss.NewStyle().Bold(true)
 	accentStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Bold(true)
 	metaStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
+	overflowStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Bold(true)
 )

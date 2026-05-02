@@ -242,6 +242,7 @@ func TestAppTUIHelp(t *testing.T) {
 	output := stderr.String()
 	for _, want := range []string{
 		"rein [global flags] tui",
+		"Scroll the overview/drilldown pane when it overflows.",
 		"Toggle compact vs expanded execution drilldown.",
 		"Refresh daemon data.",
 	} {
