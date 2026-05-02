@@ -25,6 +25,7 @@ import (
 	"google.golang.org/protobuf/types/dynamicpb"
 
 	"github.com/earchibald/rein/internal/adapter"
+	"github.com/earchibald/rein/internal/instance"
 	"github.com/earchibald/rein/internal/server"
 	"github.com/earchibald/rein/internal/service"
 	"github.com/earchibald/rein/internal/storage/sqlite"
@@ -89,10 +90,14 @@ func (a *app) run(args []string) error {
 	switch remaining[0] {
 	case "daemon":
 		return a.runDaemon(root, remaining[1:])
+	case "backup":
+		return a.runBackup(root, remaining[1:])
 	case "doctor":
 		return a.runDoctor(root, remaining[1:])
 	case "describe-as":
 		return a.runDescribe(remaining)
+	case "restore":
+		return a.runRestore(root, remaining[1:])
 	case "tui":
 		return a.runTUI(root, remaining[1:])
 	default:
@@ -142,6 +147,11 @@ func (a *app) serveDaemon(config daemonServeConfig) error {
 	if err := config.instance.EnsureRootDir(); err != nil {
 		return fmt.Errorf("prepare instance state directory: %w", err)
 	}
+	pidFile, err := instance.AcquirePIDFile(config.instance.PIDPath)
+	if err != nil {
+		return fmt.Errorf("lock instance daemon pid file: %w", err)
+	}
+	defer pidFile.Close()
 
 	store, err := sqlite.OpenAndMigrate(context.Background(), sqlite.Config{Path: config.instance.DatabasePath})
 	if err != nil {
@@ -463,9 +473,11 @@ func (a *app) printRootHelp() {
 
 	fmt.Fprintln(a.stderr, "Usage:")
 	fmt.Fprintln(a.stderr, "  rein [global flags] <service> <verb> [flags]")
+	fmt.Fprintln(a.stderr, "  rein [global flags] backup [flags] <destination>")
 	fmt.Fprintln(a.stderr, "  rein [global flags] daemon serve [flags]")
 	fmt.Fprintln(a.stderr, "  rein [global flags] doctor")
 	fmt.Fprintln(a.stderr, "  rein [global flags] describe-as=<format>")
+	fmt.Fprintln(a.stderr, "  rein [global flags] restore [flags] <source>")
 	fmt.Fprintln(a.stderr, "  rein [global flags] tui")
 	fmt.Fprintln(a.stderr)
 	fmt.Fprintln(a.stderr, "Global flags:")
@@ -493,10 +505,25 @@ func (a *app) printRootHelp() {
 		}
 	}
 	fmt.Fprintln(a.stderr)
+	fmt.Fprintln(a.stderr, "  backup\tCheckpoint SQLite WAL and atomically copy the selected instance state.")
 	fmt.Fprintln(a.stderr, "  tui\tTerminal UI over the canonical gRPC surface.")
 	fmt.Fprintln(a.stderr, "  daemon serve\tStart the daemon and expose the canonical gRPC surface.")
 	fmt.Fprintln(a.stderr, "  doctor\tEmit JSON diagnostics for daemon health and local instance readiness.")
 	fmt.Fprintln(a.stderr, "  describe-as=<format>\tEmit a stable machine-consumable surface description.")
+	fmt.Fprintln(a.stderr, "  restore\tAtomically replace the selected instance state from a backup copy.")
+}
+
+func (a *app) printBackupHelp() {
+	fmt.Fprintln(a.stderr, "Usage:")
+	fmt.Fprintln(a.stderr, "  rein [global flags] backup [flags] <destination>")
+	fmt.Fprintln(a.stderr)
+	fmt.Fprintln(a.stderr, "Checkpoint SQLite WAL for the selected instance and atomically copy its")
+	fmt.Fprintln(a.stderr, "state directory into <destination>. Runtime sockets and daemon pid files")
+	fmt.Fprintln(a.stderr, "are skipped. <destination> must not already exist.")
+	fmt.Fprintln(a.stderr)
+	fmt.Fprintln(a.stderr, "Flags:")
+	fmt.Fprintln(a.stderr, "  --stop bool")
+	fmt.Fprintln(a.stderr, "    Stop the selected daemon first as a paranoid fallback.")
 }
 
 func (a *app) printDaemonHelp() {
@@ -527,6 +554,20 @@ func (a *app) printDoctorHelp() {
 	fmt.Fprintln(a.stderr, "Emit machine-parseable JSON diagnostics covering daemon reachability,")
 	fmt.Fprintln(a.stderr, "instance layout, adapter registry compatibility, credential readiness,")
 	fmt.Fprintln(a.stderr, "and SQLite migration state for the selected instance.")
+}
+
+func (a *app) printRestoreHelp() {
+	fmt.Fprintln(a.stderr, "Usage:")
+	fmt.Fprintln(a.stderr, "  rein [global flags] restore [flags] <source>")
+	fmt.Fprintln(a.stderr)
+	fmt.Fprintln(a.stderr, "Atomically replace the selected instance state directory from <source>.")
+	fmt.Fprintln(a.stderr, "The daemon must be stopped first; pass --stop to stop a daemon that still")
+	fmt.Fprintln(a.stderr, "holds the selected instance pid file. Runtime sockets and daemon pid files")
+	fmt.Fprintln(a.stderr, "from the backup are not restored.")
+	fmt.Fprintln(a.stderr)
+	fmt.Fprintln(a.stderr, "Flags:")
+	fmt.Fprintln(a.stderr, "  --stop bool")
+	fmt.Fprintln(a.stderr, "    Stop the selected daemon before replacing its state directory.")
 }
 
 func (a *app) printTUIHelp() {

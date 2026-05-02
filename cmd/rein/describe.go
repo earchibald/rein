@@ -111,8 +111,10 @@ func supportedDescribeFormats() []describeFormatDescription {
 func rootUsageLines() []string {
 	return []string{
 		"rein [global flags] <service> <verb> [flags]",
+		"rein [global flags] backup [flags] <destination>",
 		"rein [global flags] daemon serve [flags]",
 		"rein [global flags] describe-as=<format>",
+		"rein [global flags] restore [flags] <source>",
 	}
 }
 

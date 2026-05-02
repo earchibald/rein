@@ -89,8 +89,9 @@ func TestDoctorCommandEmitsStructuredJSON(t *testing.T) {
 
 	var payload struct {
 		Instance struct {
-			Name   string `json:"name"`
-			Layout struct {
+			Name    string `json:"name"`
+			PIDPath string `json:"pidPath"`
+			Layout  struct {
 				Canonical      bool `json:"canonical"`
 				RootExists     bool `json:"rootExists"`
 				DatabaseExists bool `json:"databaseExists"`
@@ -128,6 +129,9 @@ func TestDoctorCommandEmitsStructuredJSON(t *testing.T) {
 
 	if payload.Instance.Name != instance.DefaultName {
 		t.Fatalf("instance name = %q, want %q", payload.Instance.Name, instance.DefaultName)
+	}
+	if payload.Instance.PIDPath != layout.PIDPath {
+		t.Fatalf("instance pid path = %q, want %q", payload.Instance.PIDPath, layout.PIDPath)
 	}
 	if !payload.Instance.Layout.Canonical || !payload.Instance.Layout.RootExists || !payload.Instance.Layout.DatabaseExists {
 		t.Fatalf("instance layout = %+v, want canonical existing layout", payload.Instance.Layout)
