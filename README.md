@@ -1,6 +1,86 @@
 # rein
 Modular orchestrator daemon — successor to op-obsidian. Go daemon + plural HMIs (CLI/TUI) + plugin marketplace.
 
+Rein is still early, but the current tree already ships a usable local daemon, a descriptor-driven CLI, a terminal UI, per-instance SQLite state management, backup/restore tooling, diagnostics, and opt-in OTLP telemetry with a bundled SigNoz dashboard pack.
+
+## What ships today
+
+- A single `rein` binary that can run the daemon, speak the canonical gRPC/CLI surface, and launch the TUI.
+- Per-instance state under `~/.local/state/rein/instances/<name>/` (or `$XDG_STATE_HOME/rein/instances/<name>/`) with `rein backup` and `rein restore` for safe copies.
+- `rein doctor` JSON diagnostics for instance layout, daemon reachability, adapter registry readiness, credential-provider readiness, and SQLite migration state.
+- Opt-in OTLP/gRPC export for traces, metrics, and logs, plus a bundled `rein dashboards apply` workflow for SigNoz.
+- A signed repository marketplace index plus bundled first-party plugins under `plugins/`.
+- External seams for one-shot migration tooling and external coding adapters, without pulling those source-system dependencies into the core daemon.
+
+## Quickstart
+
+Build the current tree with Go 1.25:
+
+```bash
+go build -o bin/rein ./cmd/rein
+```
+
+Start the daemon for the default `live` instance:
+
+```bash
+./bin/rein daemon serve
+```
+
+In another terminal, inspect health and the current API surface:
+
+```bash
+./bin/rein doctor
+./bin/rein project list
+./bin/rein issue list
+./bin/rein describe-as=cli
+```
+
+Launch the terminal UI against that same daemon:
+
+```bash
+./bin/rein tui
+```
+
+Checkpoint the selected instance before risky changes:
+
+```bash
+./bin/rein backup ./backups/live
+```
+
+Apply the bundled SigNoz dashboards from the repo root (or any child directory inside this repo):
+
+```bash
+SIGNOZ_BASE_URL=http://localhost:3301 \
+SIGNOZ_API_KEY=replace-me \
+./bin/rein dashboards apply
+```
+
+## Documentation
+
+Longer user guides live under `docs/` and can be read directly in the repo or served as an mdBook:
+
+- [Docs overview](docs/src/README.md)
+- [CLI quickstart](docs/src/cli-quickstart.md)
+- [TUI quickstart](docs/src/tui-quickstart.md)
+- [Metrics, logs, and OTLP](docs/src/metrics-logs-otlp.md)
+- [Plugin author guide](docs/src/plugin-author-guide.md)
+- [Migration guide](docs/src/migration-guide.md)
+- [Docs summary / table of contents](docs/src/SUMMARY.md)
+
+To browse the same content as a docs site locally:
+
+```bash
+cargo install mdbook --locked
+mdbook serve docs
+```
+
+## Current limitations to keep in mind
+
+- The repository marketplace can advertise remote adapters today, but remote managed execution is still an explicit stub until the external adapter bridge lands.
+- `rein dashboards apply` currently installs bundled local dashboard plugins; remote dashboard bootstrap is an explicit follow-up.
+- Looking-glass tail support is surfaced in the TUI and execution inspection, but the daemon does not stream live tails yet.
+- One-shot imports from op-obsidian live in the separate [`earchibald/rein-migrate-from-op-obsidian`](https://github.com/earchibald/rein-migrate-from-op-obsidian) repo.
+
 ## Instance state layout
 
 - Rein keeps per-instance state under `~/.local/state/rein/instances/<name>/` by default, or under `$XDG_STATE_HOME/rein/instances/<name>/` when `XDG_STATE_HOME` is set.
@@ -28,21 +108,28 @@ Modular orchestrator daemon — successor to op-obsidian. Go daemon + plural HMI
 - Use `rein describe-as=mcp` for a stable YAML description of commands, flags, gateway stub routes, and schemas suitable for wrapper/skill tooling.
 - Use `rein tui` for the terminal-native HMI over that same daemon surface.
 - Service commands mirror the protobuf API: `rein project|issue|execution|workflow|adapter <verb>`.
-- Request flags map 1:1 to top-level gRPC request fields. Scalar fields take plain values; message, repeated, and map fields take JSON blobs.
+- Top-level request flags map 1:1 to top-level protobuf request fields and use the protobuf field names (for example `--project_id`).
+- Scalar fields take plain values; message, repeated, and map fields take JSON blobs.
+- Nested JSON payloads are decoded with protobuf JSON field names (for example `displayName` inside a `Project` payload).
 - Responses are emitted as JSON using protobuf field names.
 
 ## Adapter registry
 
 - The repo ships a signed marketplace index at `.claude-plugin/marketplace.json` for built-in and remote adapter discovery.
-- Repository-local trusted public keys live at `.claude-plugin/trusted-keys.json`; the daemon and `rein doctor` load them automatically before verifying marketplace signatures.
+- Repository-local trusted public keys live at `.claude-plugin/trusted-keys.json`; `rein doctor` reports signature presence and verification status.
+- The daemon's local discovery path tolerates unsigned marketplace indexes for local development, but the committed repository index should remain signed.
 - `messaging-null` is a no-op notification adapter that advertises `messaging.post` so workflows can stay launchable until Slack and Discord adapters land.
 - The in-tree `muxiterm` multiplexer adapter manifest lives at `plugins/muxiterm/.claude-plugin/plugin.json` and advertises the bundled mux capability surface.
+- The in-tree `tracker-github` manifest lives at `plugins/tracker-github/.claude-plugin/plugin.json` and advertises worktree/PR/tracker capabilities.
 
 ## OTLP telemetry
 
-- OTLP export is opt-in. When no OTLP endpoint is configured, the daemon keeps its existing no-op behavior for traces, metrics, and logs.
-- When configured, the daemon emits OTLP/gRPC traces, logs, and bounded custom metrics for daemon starts, daemon liveness, gRPC request counts, gRPC error counts, and gRPC request duration.
+- OTLP export is opt-in. When no OTLP endpoint is configured, the daemon keeps its existing no-op behavior for traces, metrics, and OTLP log export.
+- The daemon still writes structured text logs to stdout even when OTLP export is disabled.
+- When configured, the daemon exports traces, logs, and bounded custom metrics for daemon starts, daemon liveness, gRPC request counts, gRPC error counts, and gRPC request duration.
+- Current metric names are `rein.daemon.starts`, `rein.daemon.running`, `rein.rpc.requests`, `rein.rpc.errors`, and `rein.rpc.duration`.
 - Default OTLP resource attributes include `service.name=rein-daemon`, `rein.instance=<instance>`, and `service.instance.id=<instance>`.
+- `rein dashboards apply` installs the bundled SigNoz dashboard JSON at `plugins/rein-dashboards/signoz/rein-daemon-otlp.json`.
 
 ## Dashboards marketplace
 
@@ -61,21 +148,24 @@ Modular orchestrator daemon — successor to op-obsidian. Go daemon + plural HMI
 
 - Rein discovers adapters from `.claude-plugin/marketplace.json` at the repository root.
 - RN-23 boots the Claude Code coding-agent adapter as a remote GitHub marketplace entry (`earchibald/rein-adapter-claude-code`) instead of a local plugin checkout.
-- The registry and adapter APIs now surface that remote entry immediately; managed execution still reports an explicit “not wired yet” stub until the external adapter bridge lands.
+- The registry and adapter APIs surface that remote entry immediately; managed execution still reports an explicit “not wired yet” stub until the external adapter bridge lands.
 
 ## External migration tooling
 
-- One-shot migration/import tools should live in separate repos rather than pulling legacy source-system dependencies into `rein`.
+- One-shot migration/import tools live in separate repos rather than pulling legacy source-system dependencies into `rein`.
 - `github.com/earchibald/rein/instance` exposes the canonical instance layout helpers used to resolve `grpc.sock` and `rein.db` paths for external tools.
 - `github.com/earchibald/rein/sqlite` exposes the migrated locked-entity SQLite store needed to create and populate rein state from those external tools.
-- RN-27 boots the op-obsidian migration CLI as the separate repo `earchibald/rein-migrate-from-op-obsidian`.
+- RN-27 boots the op-obsidian migration CLI as the separate repo [`earchibald/rein-migrate-from-op-obsidian`](https://github.com/earchibald/rein-migrate-from-op-obsidian).
 
 ## Development
 
+- Go 1.25 is the repository baseline.
 - `just proto` lints the Buf workspace and regenerates the committed Go protobuf/gRPC stubs.
+- `just build` builds `./cmd/rein` into `bin/rein`.
 - `just test` is the standard test entrypoint and runs the suite via `gotestsum`.
 - `just test-race` keeps the same runner while enabling the Go race detector.
 - `just test-cover` writes `coverage.out` and prints `go tool cover -func` output for local review.
+- `just lint` runs golangci-lint v2 (`go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.1`).
 
 ## Test harness
 

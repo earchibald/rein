@@ -1,0 +1,12 @@
+[book]
+title = "rein"
+description = "User documentation for the rein daemon, CLI, TUI, telemetry, plugins, and migration tooling."
+authors = ["earchibald"]
+language = "en"
+src = "src"
+
+[output.html]
+default-theme = "navy"
+git-repository-url = "https://github.com/earchibald/rein"
+edit-url-template = "https://github.com/earchibald/rein/edit/main/docs/src/{path}"
+site-url = "/rein/"
