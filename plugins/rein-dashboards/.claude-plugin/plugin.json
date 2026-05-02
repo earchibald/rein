@@ -1,0 +1,13 @@
+{
+  "name": "rein-dashboards",
+  "version": "0.1.0",
+  "description": "Reference SigNoz dashboards for rein OTLP telemetry.",
+  "provider": "signoz",
+  "dashboards": [
+    {
+      "id": "rein-daemon-otlp",
+      "title": "Rein Daemon OTLP",
+      "path": "signoz/rein-daemon-otlp.json"
+    }
+  ]
+}

@@ -14,6 +14,7 @@ Modular orchestrator daemon — successor to op-obsidian. Go daemon + plural HMI
 - `rein backup <destination>` checkpoints SQLite WAL with `PRAGMA wal_checkpoint(TRUNCATE)` and atomically copies the selected instance state directory into `<destination>` while the daemon may still be running.
 - `rein backup --stop <destination>` is the paranoid fallback when you want the selected daemon stopped before copying.
 - `rein restore <source>` atomically replaces the selected instance state directory from `<source>`; stop the daemon first or pass `--stop` so rein can stop the selected instance before restoring.
+- `rein daemon serve` accepts optional OTLP/gRPC export flags (`--otlp-endpoint`, `--otlp-headers`, `--otlp-insecure`) and also honors `OTEL_EXPORTER_OTLP_*`, `OTEL_SERVICE_NAME`, and `OTEL_RESOURCE_ATTRIBUTES`.
 
 ## CLI surface
 
@@ -22,6 +23,7 @@ Modular orchestrator daemon — successor to op-obsidian. Go daemon + plural HMI
 - Use `rein backup <destination>` to checkpoint and copy the selected instance state directory.
 - Use `rein restore <source>` to swap the selected instance state directory back from a backup copy.
 - Use `rein doctor` to inspect the selected instance and emit machine-parseable JSON readiness diagnostics.
+- Use `rein dashboards apply` to push the bundled `rein-dashboards` SigNoz reference dashboards into a SigNoz workspace over the HTTP API.
 - Use `rein describe-as=cli` for a manual-style, machine-consumable description of the CLI/gRPC surface and reachable protobuf schemas.
 - Use `rein describe-as=mcp` for a stable YAML description of commands, flags, gateway stub routes, and schemas suitable for wrapper/skill tooling.
 - Use `rein tui` for the terminal-native HMI over that same daemon surface.
@@ -35,6 +37,19 @@ Modular orchestrator daemon — successor to op-obsidian. Go daemon + plural HMI
 - Repository-local trusted public keys live at `.claude-plugin/trusted-keys.json`; the daemon and `rein doctor` load them automatically before verifying marketplace signatures.
 - `messaging-null` is a no-op notification adapter that advertises `messaging.post` so workflows can stay launchable until Slack and Discord adapters land.
 - The in-tree `muxiterm` multiplexer adapter manifest lives at `plugins/muxiterm/.claude-plugin/plugin.json` and advertises the bundled mux capability surface.
+
+## OTLP telemetry
+
+- OTLP export is opt-in. When no OTLP endpoint is configured, the daemon keeps its existing no-op behavior for traces, metrics, and logs.
+- When configured, the daemon emits OTLP/gRPC traces, logs, and bounded custom metrics for daemon starts, daemon liveness, gRPC request counts, gRPC error counts, and gRPC request duration.
+- Default OTLP resource attributes include `service.name=rein-daemon`, `rein.instance=<instance>`, and `service.instance.id=<instance>`.
+
+## Dashboards marketplace
+
+- The reference dashboards ship from a dedicated marketplace index at `.claude-plugin/dashboards-marketplace.json`.
+- The bundled local plugin lives at `plugins/rein-dashboards/.claude-plugin/plugin.json` and currently targets SigNoz with `plugins/rein-dashboards/signoz/rein-daemon-otlp.json`.
+- `rein dashboards apply` resolves that marketplace entry from the repository root, then creates or updates dashboards in SigNoz using the `SIGNOZ-API-KEY` header.
+- The loader accepts the same future-facing local/GitHub/URL source shape as the adapter marketplace, but remote dashboard bootstrap remains an explicit follow-up.
 
 ## TUI
 

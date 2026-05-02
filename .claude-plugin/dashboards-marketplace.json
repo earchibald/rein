@@ -1,0 +1,12 @@
+{
+  "name": "rein-dashboards",
+  "plugins": [
+    {
+      "name": "rein-dashboards",
+      "version": "0.1.0",
+      "description": "Reference SigNoz dashboards for rein OTLP telemetry.",
+      "provider": "signoz",
+      "source": "./plugins/rein-dashboards"
+    }
+  ]
+}
