@@ -218,6 +218,8 @@ func describeField(field protoreflect.FieldDescriptor) fieldDescription {
 			schemaRef = string(field.Message().FullName())
 		case protoreflect.EnumKind:
 			schemaRef = string(field.Enum().FullName())
+		default:
+			// Scalar fields do not reference nested schemas.
 		}
 	}
 
