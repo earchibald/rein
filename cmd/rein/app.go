@@ -58,7 +58,7 @@ type fieldBinding struct {
 	set   bool
 }
 
-func newApp(stdout, stderr io.Writer, lookupEnv func(string) (string, bool), userHomeDir func() (string, error), getwd func() (string, error)) *app {
+func newApp(stdout, stderr io.Writer, lookupEnv func(string) (string, bool), userHomeDir, getwd func() (string, error)) *app {
 	if getwd == nil {
 		getwd = os.Getwd
 	}

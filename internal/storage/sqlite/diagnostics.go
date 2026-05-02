@@ -97,13 +97,8 @@ func DiagnoseMigrations(ctx context.Context, cfg Config) MigrationDiagnostic {
 	return diagnostic
 }
 
-func readMigrationVersion(ctx context.Context, db *sql.DB, migrationsTable string) (uint, bool, error) {
-	var (
-		version uint
-		dirty   bool
-	)
-
-	err := db.QueryRowContext(ctx, fmt.Sprintf(`SELECT version, dirty FROM %s LIMIT 1`, migrationsTable)).Scan(&version, &dirty)
+func readMigrationVersion(ctx context.Context, db *sql.DB, migrationsTable string) (version uint, dirty bool, err error) {
+	err = db.QueryRowContext(ctx, fmt.Sprintf(`SELECT version, dirty FROM %s LIMIT 1`, migrationsTable)).Scan(&version, &dirty)
 	if err == nil {
 		return version, dirty, nil
 	}
