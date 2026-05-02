@@ -6,14 +6,20 @@ option go_package = "github.com/earchibald/rein/gen/go/rein/v1;reinv1";
 
 import "rein/v1/types.proto";
 
+// WorkflowService manages workflows stored by the daemon.
 service WorkflowService {
+  // List workflows stored in the daemon.
   rpc ListWorkflows(ListWorkflowsRequest) returns (ListWorkflowsResponse);
+  // Get a single workflow by id.
   rpc GetWorkflow(GetWorkflowRequest) returns (GetWorkflowResponse);
+  // Validate a workflow payload without storing it.
   rpc ValidateWorkflow(ValidateWorkflowRequest) returns (ValidateWorkflowResponse);
 }
 
 message ListWorkflowsRequest {
+  // Paginate workflow results. Pass JSON matching PageRequest.
   PageRequest page = 1;
+  // Match workflow id, name, description, or version.
   string query = 2;
 }
 
@@ -23,6 +29,7 @@ message ListWorkflowsResponse {
 }
 
 message GetWorkflowRequest {
+  // Workflow identifier.
   string id = 1;
 }
 
@@ -31,6 +38,7 @@ message GetWorkflowResponse {
 }
 
 message ValidateWorkflowRequest {
+  // Workflow payload. Pass JSON matching Workflow.
   Workflow workflow = 1;
 }
 

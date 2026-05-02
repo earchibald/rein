@@ -20,6 +20,8 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 
 	reinv1 "github.com/earchibald/rein/gen/go/rein/v1"
+	"github.com/earchibald/rein/internal/service"
+	"github.com/earchibald/rein/internal/storage/sqlite"
 )
 
 type grpcContract struct {
@@ -88,6 +90,7 @@ func TestRuntimeUnaryRPCErrorContracts(t *testing.T) {
 	)
 
 	runtime := New(Options{
+		Services: managedContractServices(t),
 		GRPCOptions: []grpc.ServerOption{
 			grpc.UnaryInterceptor(func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 				mu.Lock()
@@ -177,12 +180,58 @@ func unaryExpectation(contract grpcContract) unaryRPCExpectation {
 		return unaryRPCExpectation{code: codes.InvalidArgument, message: "id is required"}
 	case reinv1.AdapterService_ValidateAdapter_FullMethodName:
 		return unaryRPCExpectation{code: codes.InvalidArgument, message: "adapter is required"}
+	case reinv1.ExecutionService_ListExecutions_FullMethodName:
+		return unaryRPCExpectation{code: codes.OK}
+	case reinv1.ExecutionService_GetExecution_FullMethodName:
+		return unaryRPCExpectation{code: codes.InvalidArgument, message: "id is required"}
+	case reinv1.ExecutionService_StartExecution_FullMethodName:
+		return unaryRPCExpectation{code: codes.InvalidArgument, message: "issue_id is required"}
+	case reinv1.ExecutionService_CancelExecution_FullMethodName:
+		return unaryRPCExpectation{code: codes.InvalidArgument, message: "id is required"}
+	case reinv1.IssueService_ListIssues_FullMethodName:
+		return unaryRPCExpectation{code: codes.OK}
+	case reinv1.IssueService_GetIssue_FullMethodName:
+		return unaryRPCExpectation{code: codes.InvalidArgument, message: "id is required"}
+	case reinv1.IssueService_CreateIssue_FullMethodName:
+		return unaryRPCExpectation{code: codes.InvalidArgument, message: "issue is required"}
+	case reinv1.IssueService_UpdateIssue_FullMethodName:
+		return unaryRPCExpectation{code: codes.InvalidArgument, message: "issue is required"}
+	case reinv1.ProjectService_ListProjects_FullMethodName:
+		return unaryRPCExpectation{code: codes.OK}
+	case reinv1.ProjectService_GetProject_FullMethodName:
+		return unaryRPCExpectation{code: codes.InvalidArgument, message: "id is required"}
+	case reinv1.ProjectService_CreateProject_FullMethodName:
+		return unaryRPCExpectation{code: codes.InvalidArgument, message: "project is required"}
+	case reinv1.ProjectService_UpdateProject_FullMethodName:
+		return unaryRPCExpectation{code: codes.InvalidArgument, message: "project is required"}
+	case reinv1.WorkflowService_ListWorkflows_FullMethodName:
+		return unaryRPCExpectation{code: codes.OK}
+	case reinv1.WorkflowService_GetWorkflow_FullMethodName:
+		return unaryRPCExpectation{code: codes.InvalidArgument, message: "id is required"}
+	case reinv1.WorkflowService_ValidateWorkflow_FullMethodName:
+		return unaryRPCExpectation{code: codes.InvalidArgument, message: "workflow is required"}
 	default:
 		return unaryRPCExpectation{
 			code:    codes.Unimplemented,
 			message: "method " + contract.method + " not implemented",
 		}
 	}
+}
+
+func managedContractServices(t testing.TB) service.Set {
+	t.Helper()
+
+	store, err := sqlite.OpenInMemoryAndMigrate(context.Background(), t.Name())
+	if err != nil {
+		t.Fatalf("OpenInMemoryAndMigrate() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("Close() error = %v", err)
+		}
+	})
+
+	return service.NewManagedSet(store, newRuntimeCatalog())
 }
 
 func findMethodDescriptor(t testing.TB, fullMethod string) protoreflect.MethodDescriptor {

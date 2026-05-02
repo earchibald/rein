@@ -27,9 +27,14 @@ const (
 // WorkflowServiceClient is the client API for WorkflowService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+//
+// WorkflowService manages workflows stored by the daemon.
 type WorkflowServiceClient interface {
+	// List workflows stored in the daemon.
 	ListWorkflows(ctx context.Context, in *ListWorkflowsRequest, opts ...grpc.CallOption) (*ListWorkflowsResponse, error)
+	// Get a single workflow by id.
 	GetWorkflow(ctx context.Context, in *GetWorkflowRequest, opts ...grpc.CallOption) (*GetWorkflowResponse, error)
+	// Validate a workflow payload without storing it.
 	ValidateWorkflow(ctx context.Context, in *ValidateWorkflowRequest, opts ...grpc.CallOption) (*ValidateWorkflowResponse, error)
 }
 
@@ -74,9 +79,14 @@ func (c *workflowServiceClient) ValidateWorkflow(ctx context.Context, in *Valida
 // WorkflowServiceServer is the server API for WorkflowService service.
 // All implementations should embed UnimplementedWorkflowServiceServer
 // for forward compatibility.
+//
+// WorkflowService manages workflows stored by the daemon.
 type WorkflowServiceServer interface {
+	// List workflows stored in the daemon.
 	ListWorkflows(context.Context, *ListWorkflowsRequest) (*ListWorkflowsResponse, error)
+	// Get a single workflow by id.
 	GetWorkflow(context.Context, *GetWorkflowRequest) (*GetWorkflowResponse, error)
+	// Validate a workflow payload without storing it.
 	ValidateWorkflow(context.Context, *ValidateWorkflowRequest) (*ValidateWorkflowResponse, error)
 }
 

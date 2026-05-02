@@ -6,18 +6,28 @@ option go_package = "github.com/earchibald/rein/gen/go/rein/v1;reinv1";
 
 import "rein/v1/types.proto";
 
+// IssueService manages issues stored by the daemon.
 service IssueService {
+  // List issues stored in the daemon.
   rpc ListIssues(ListIssuesRequest) returns (ListIssuesResponse);
+  // Get a single issue by id.
   rpc GetIssue(GetIssueRequest) returns (GetIssueResponse);
+  // Create an issue record.
   rpc CreateIssue(CreateIssueRequest) returns (CreateIssueResponse);
+  // Update an issue record.
   rpc UpdateIssue(UpdateIssueRequest) returns (UpdateIssueResponse);
 }
 
 message ListIssuesRequest {
+  // Paginate issue results. Pass JSON matching PageRequest.
   PageRequest page = 1;
+  // Filter issues by project id.
   string project_id = 2;
+  // Filter issues by status.
   IssueStatus status = 3;
+  // Filter issues by assignee.
   string assignee = 4;
+  // Match issue id, title, summary, workflow id, or assignee.
   string query = 5;
 }
 
@@ -27,6 +37,7 @@ message ListIssuesResponse {
 }
 
 message GetIssueRequest {
+  // Issue identifier.
   string id = 1;
 }
 
@@ -35,6 +46,7 @@ message GetIssueResponse {
 }
 
 message CreateIssueRequest {
+  // Issue payload. Pass JSON matching Issue.
   Issue issue = 1;
 }
 
@@ -43,6 +55,7 @@ message CreateIssueResponse {
 }
 
 message UpdateIssueRequest {
+  // Replacement issue payload. Pass JSON matching Issue.
   Issue issue = 1;
 }
 

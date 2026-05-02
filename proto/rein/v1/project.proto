@@ -6,16 +6,24 @@ option go_package = "github.com/earchibald/rein/gen/go/rein/v1;reinv1";
 
 import "rein/v1/types.proto";
 
+// ProjectService manages projects stored by the daemon.
 service ProjectService {
+  // List projects stored in the daemon.
   rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse);
+  // Get a single project by id.
   rpc GetProject(GetProjectRequest) returns (GetProjectResponse);
+  // Create a project record.
   rpc CreateProject(CreateProjectRequest) returns (CreateProjectResponse);
+  // Update a project record.
   rpc UpdateProject(UpdateProjectRequest) returns (UpdateProjectResponse);
 }
 
 message ListProjectsRequest {
+  // Paginate project results. Pass JSON matching PageRequest.
   PageRequest page = 1;
+  // Filter projects by status.
   ProjectStatus status = 2;
+  // Match project id, slug, display name, or summary.
   string query = 3;
 }
 
@@ -25,6 +33,7 @@ message ListProjectsResponse {
 }
 
 message GetProjectRequest {
+  // Project identifier.
   string id = 1;
 }
 
@@ -33,6 +42,7 @@ message GetProjectResponse {
 }
 
 message CreateProjectRequest {
+  // Project payload. Pass JSON matching Project.
   Project project = 1;
 }
 
@@ -41,6 +51,7 @@ message CreateProjectResponse {
 }
 
 message UpdateProjectRequest {
+  // Replacement project payload. Pass JSON matching Project.
   Project project = 1;
 }
 

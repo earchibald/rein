@@ -11,6 +11,14 @@ Modular orchestrator daemon — successor to op-obsidian. Go daemon + plural HMI
   - `rein.db` — canonical SQLite path reserved for that instance's persisted state.
 - `rein doctor` will validate that commands and on-disk state follow this canonical layout in a future issue.
 
+## CLI surface
+
+- `rein` is the canonical gRPC client CLI. By default it connects to the selected instance over that instance's unix socket.
+- Use `rein daemon serve` to start the daemon for the selected instance.
+- Service commands mirror the protobuf API: `rein project|issue|execution|workflow|adapter <verb>`.
+- Request flags map 1:1 to top-level gRPC request fields. Scalar fields take plain values; message, repeated, and map fields take JSON blobs.
+- Responses are emitted as JSON using protobuf field names.
+
 ## Development
 
 - `just proto` lints the Buf workspace and regenerates the committed Go protobuf/gRPC stubs.
