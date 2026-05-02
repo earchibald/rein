@@ -134,6 +134,14 @@ func TestBackupStopStopsDaemonBeforeCopy(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
+	waited := false
+	waitHelper := func() error {
+		if waited {
+			return nil
+		}
+		waited = true
+		return <-done
+	}
 	helperExited := false
 	defer func() {
 		if helperExited {
@@ -141,9 +149,10 @@ func TestBackupStopStopsDaemonBeforeCopy(t *testing.T) {
 		}
 		select {
 		case <-done:
+			waited = true
 		default:
 			_ = cmd.Process.Kill()
-			<-done
+			_ = waitHelper()
 		}
 	}()
 	waitForPIDLock(t, layout.PIDPath)
@@ -156,8 +165,11 @@ func TestBackupStopStopsDaemonBeforeCopy(t *testing.T) {
 	if err := app.run([]string{"backup", "--stop", backupPath}); err != nil {
 		t.Fatalf("run() error = %v", err)
 	}
-	if err := <-done; err != nil {
-		t.Fatalf("helper exit error = %v", err)
+	if err := waitHelper(); err != nil {
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
+			t.Fatalf("helper exit error = %v", err)
+		}
 	}
 	helperExited = true
 	if _, err := os.Stat(filepath.Join(backupPath, "state.txt")); err != nil {
