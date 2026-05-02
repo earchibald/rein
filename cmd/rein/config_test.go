@@ -169,6 +169,8 @@ func TestAppCommandHelpUsesProtoComments(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	app := newApp(&stdout, &stderr, func(string) (string, bool) { return "", false }, func() (string, error) {
 		return "/Users/tester", nil
+	}, func() (string, error) {
+		return "/repo", nil
 	})
 
 	err := app.run([]string{"project", "list", "--help"})
@@ -185,5 +187,25 @@ func TestAppCommandHelpUsesProtoComments(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Fatalf("help output missing %q\n%s", want, output)
 		}
+	}
+}
+
+func TestRootHelpListsDoctorCommand(t *testing.T) {
+	t.Parallel()
+
+	var stdout, stderr bytes.Buffer
+	app := newApp(&stdout, &stderr, func(string) (string, bool) { return "", false }, func() (string, error) {
+		return "/Users/tester", nil
+	}, func() (string, error) {
+		return "/repo", nil
+	})
+
+	err := app.run([]string{"--help"})
+	if err != flag.ErrHelp {
+		t.Fatalf("run() error = %v, want %v", err, flag.ErrHelp)
+	}
+
+	if got := stderr.String(); !strings.Contains(got, "doctor\tEmit JSON diagnostics") {
+		t.Fatalf("root help missing doctor command:\n%s", got)
 	}
 }

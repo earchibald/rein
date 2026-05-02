@@ -70,15 +70,15 @@ const (
 )
 
 type Source struct {
-	Kind     SourceKind
-	Path     string
-	Repo     string
-	URL      string
-	Ref      string
-	SHA      string
-	Package  string
-	Version  string
-	Registry string
+	Kind     SourceKind `json:"kind"`
+	Path     string     `json:"path,omitempty"`
+	Repo     string     `json:"repo,omitempty"`
+	URL      string     `json:"url,omitempty"`
+	Ref      string     `json:"ref,omitempty"`
+	SHA      string     `json:"sha,omitempty"`
+	Package  string     `json:"package,omitempty"`
+	Version  string     `json:"version,omitempty"`
+	Registry string     `json:"registry,omitempty"`
 }
 
 type marketplaceDocument struct {
