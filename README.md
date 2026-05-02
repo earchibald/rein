@@ -29,6 +29,13 @@ Modular orchestrator daemon — successor to op-obsidian. Go daemon + plural HMI
 - Execution drilldown includes workflow steps, side effects, execution metadata, and looking-glass status for any adapter that advertises `capabilities.tail=true`.
 - Looking-glass tailing is capability-gated: when adapters advertise tail support but the daemon cannot stream it yet, the TUI shows that state instead of assuming live tail availability.
 
+## Marketplace bootstrap
+
+- Rein discovers adapters from `.claude-plugin/marketplace.json` at the repository root.
+- Repository-local signing keys live in `.claude-plugin/trusted-keys.json`; the daemon and `rein doctor` load them automatically before verifying the marketplace signature.
+- RN-23 boots the Claude Code coding-agent adapter as a remote GitHub marketplace entry (`earchibald/rein-adapter-claude-code`) instead of a local plugin checkout.
+- The registry and adapter APIs now surface that remote entry immediately; managed execution still reports an explicit “not wired yet” stub until the external adapter bridge lands.
+
 ## Development
 
 - `just proto` lints the Buf workspace and regenerates the committed Go protobuf/gRPC stubs.
