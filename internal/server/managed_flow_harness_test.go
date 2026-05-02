@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -18,6 +19,7 @@ import (
 	"github.com/earchibald/rein/adaptertest"
 	reinv1 "github.com/earchibald/rein/gen/go/rein/v1"
 	"github.com/earchibald/rein/internal/cost"
+	"github.com/earchibald/rein/internal/credentials"
 	"github.com/earchibald/rein/internal/service"
 	"github.com/earchibald/rein/internal/storage/sqlite"
 )
@@ -320,11 +322,87 @@ func TestManagedFlowHarnessBudgetHardLimitBlocksNewLaunches(t *testing.T) {
 	}
 }
 
+func TestManagedFlowHarnessStoresCredentialReferencesNotValues(t *testing.T) {
+	t.Parallel()
+
+	harness := newManagedFlowHarness(t)
+	harness.executionServer.lookupEnv = func(name string) (string, bool) {
+		if name != "RN15_GITHUB_TOKEN" {
+			return "", false
+		}
+		return "super-secret-token", true
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	workflow := managedFlowWorkflow()
+	if err := harness.seedWorkflow(ctx, workflow); err != nil {
+		t.Fatalf("seedWorkflow() error = %v", err)
+	}
+
+	projectResp, err := harness.projectClient.CreateProject(ctx, &reinv1.CreateProjectRequest{
+		Project: &reinv1.Project{
+			Id:          "project-rein",
+			Slug:        "rein",
+			DisplayName: "rein",
+			Summary:     "Managed flow harness",
+			Status:      reinv1.ProjectStatus_PROJECT_STATUS_ACTIVE,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+
+	issueResp, err := harness.issueClient.CreateIssue(ctx, &reinv1.CreateIssueRequest{
+		Issue: &reinv1.Issue{
+			Id:         "RN-15",
+			ProjectId:  projectResp.GetProject().GetId(),
+			Title:      "Credential providers",
+			Summary:    "Ensure execution credentials resolve without persisting values",
+			Status:     reinv1.IssueStatus_ISSUE_STATUS_OPEN,
+			Priority:   reinv1.IssuePriority_ISSUE_PRIORITY_HIGH,
+			WorkflowId: workflow.GetId(),
+			Assignee:   "copilot",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateIssue() error = %v", err)
+	}
+
+	startResp, err := harness.executionClient.StartExecution(ctx, &reinv1.StartExecutionRequest{
+		IssueId:     issueResp.GetIssue().GetId(),
+		WorkflowId:  workflow.GetId(),
+		RequestedBy: "copilot",
+		Inputs: map[string]string{
+			"base_branch":                 "main",
+			"credential_ref.github_token": "env://RN15_GITHUB_TOKEN",
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartExecution() error = %v", err)
+	}
+
+	execution := startResp.GetExecution()
+	if got := execution.GetMetadata()["credential_ref.github_token"]; got != "env://RN15_GITHUB_TOKEN" {
+		t.Fatalf("StartExecution() credential ref = %q, want opaque env ref", got)
+	}
+	if got := execution.GetMetadata()["auth_mode"]; got != "credential" {
+		t.Fatalf("StartExecution() auth_mode = %q, want credential", got)
+	}
+	for key, value := range execution.GetMetadata() {
+		if value == "super-secret-token" {
+			t.Fatalf("StartExecution() metadata[%q] leaked secret value", key)
+		}
+	}
+}
+
 type managedFlowHarness struct {
 	adapterClient   reinv1.AdapterServiceClient
 	costRecorder    *cost.Recorder
 	costStream      *cost.Stream
 	executionClient reinv1.ExecutionServiceClient
+	executionServer *managedFlowExecutionService
 	issueClient     reinv1.IssueServiceClient
 	projectClient   reinv1.ProjectServiceClient
 	workflowClient  reinv1.WorkflowServiceClient
@@ -347,17 +425,20 @@ func newManagedFlowHarness(tb testing.TB) *managedFlowHarness {
 	adapters := newManagedFlowAdapterCatalog(tb)
 	costStream := cost.NewStream()
 	costRecorder := cost.NewRecorder(store, cost.WithPublisher(costStream))
+	executionServer := &managedFlowExecutionService{
+		adapters:           adapters,
+		costRecorder:       costRecorder,
+		credentialRegistry: credentials.NewBuiltinRegistry(credentials.BuiltinOptions{}),
+		lookupEnv:          os.LookupEnv,
+		store:              store,
+	}
 	bufconn := newBufconnHarness(tb, Options{
 		Services: service.Set{
-			Adapter: &managedFlowAdapterService{catalog: adapters},
-			Execution: &managedFlowExecutionService{
-				adapters:     adapters,
-				costRecorder: costRecorder,
-				store:        store,
-			},
-			Issue:    &managedFlowIssueService{store: store},
-			Project:  &managedFlowProjectService{store: store},
-			Workflow: &managedFlowWorkflowService{catalog: adapters, store: store},
+			Adapter:   &managedFlowAdapterService{catalog: adapters},
+			Execution: executionServer,
+			Issue:     &managedFlowIssueService{store: store},
+			Project:   &managedFlowProjectService{store: store},
+			Workflow:  &managedFlowWorkflowService{catalog: adapters, store: store},
 		},
 	})
 
@@ -366,6 +447,7 @@ func newManagedFlowHarness(tb testing.TB) *managedFlowHarness {
 		costRecorder:    costRecorder,
 		costStream:      costStream,
 		executionClient: reinv1.NewExecutionServiceClient(bufconn.conn),
+		executionServer: executionServer,
 		issueClient:     reinv1.NewIssueServiceClient(bufconn.conn),
 		projectClient:   reinv1.NewProjectServiceClient(bufconn.conn),
 		workflowClient:  reinv1.NewWorkflowServiceClient(bufconn.conn),
@@ -546,9 +628,11 @@ func (s *managedFlowIssueService) GetIssue(ctx context.Context, req *reinv1.GetI
 
 type managedFlowExecutionService struct {
 	reinv1.UnimplementedExecutionServiceServer
-	adapters     *managedFlowAdapterCatalog
-	costRecorder *cost.Recorder
-	store        *sqlite.Store
+	adapters           *managedFlowAdapterCatalog
+	costRecorder       *cost.Recorder
+	credentialRegistry *credentials.Registry
+	lookupEnv          func(string) (string, bool)
+	store              *sqlite.Store
 }
 
 func (s *managedFlowExecutionService) StartExecution(ctx context.Context, req *reinv1.StartExecutionRequest) (*reinv1.StartExecutionResponse, error) {
@@ -614,8 +698,20 @@ func (s *managedFlowExecutionService) StartExecution(ctx context.Context, req *r
 		return nil, status.Errorf(codes.Internal, "start execution %q: %v", execution.GetId(), err)
 	}
 
+	resolvedCredentials, err := s.resolveCredentials(ctx, issue, execution)
+	if err != nil {
+		execution.Status = reinv1.ExecutionStatus_EXECUTION_STATUS_FAILED
+		execution.FinishedTime = timestamppb.Now()
+		execution.Metadata["result"] = "failed"
+		if _, updateErr := updateStoredProto(ctx, s.store, sqlite.ExecutionKind, execution.GetId(), executionRecord.LockVersion, execution); updateErr != nil {
+			return nil, status.Errorf(codes.Internal, "execution %q credential resolution failed with %v and could not be stored: %v", execution.GetId(), err, updateErr)
+		}
+		return nil, status.Errorf(codes.FailedPrecondition, "resolve execution credentials: %v", err)
+	}
+
 	state := &managedFlowState{
 		costRecorder: s.costRecorder,
+		credentials:  resolvedCredentials,
 		execution:    execution,
 		issue:        issue,
 		workflow:     workflow,
@@ -698,9 +794,32 @@ func (s *managedFlowExecutionService) GetExecution(ctx context.Context, req *rei
 
 type managedFlowState struct {
 	costRecorder *cost.Recorder
+	credentials  map[string]string
 	execution    *reinv1.Execution
 	issue        *reinv1.Issue
 	workflow     *reinv1.Workflow
+}
+
+func (s *managedFlowExecutionService) resolveCredentials(ctx context.Context, issue *reinv1.Issue, execution *reinv1.Execution) (map[string]string, error) {
+	if s.credentialRegistry == nil {
+		return nil, nil
+	}
+
+	references := map[string]string{}
+	for key, value := range execution.GetMetadata() {
+		name, ok := strings.CutPrefix(key, "credential_ref.")
+		if !ok || strings.TrimSpace(name) == "" {
+			continue
+		}
+		references[name] = value
+	}
+
+	return s.credentialRegistry.ResolveAll(ctx, references, credentials.ExecutionScope{
+		ProjectID:   issue.GetProjectId(),
+		WorkflowID:  execution.GetWorkflowId(),
+		ExecutionID: execution.GetId(),
+		LookupEnv:   s.lookupEnv,
+	})
 }
 
 type managedFlowAdapterCatalog struct {
@@ -883,6 +1002,13 @@ func (a *managedFlowCodingAdapter) Descriptor() *reinv1.Adapter {
 func (a *managedFlowCodingAdapter) Run(ctx context.Context, state *managedFlowState, step *reinv1.WorkflowStep) error {
 	if len(step.GetDependsOn()) == 0 || state.execution.Metadata["branch"] == "" || state.execution.Metadata["worktree"] == "" {
 		return errors.New("branch and worktree must exist before opening a pull request")
+	}
+
+	if _, ok := state.execution.Metadata["credential_ref.github_token"]; ok {
+		if state.credentials["github_token"] == "" {
+			return errors.New("github_token credential must resolve before opening a pull request")
+		}
+		state.execution.Metadata["auth_mode"] = "credential"
 	}
 
 	state.execution.Metadata["pr_url"] = "https://tracker.fake/repos/rein/pull/101"
