@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -513,6 +514,49 @@ func (s *ManagedExecutionServer) GetExecution(ctx context.Context, req *reinv1.G
 	return &reinv1.GetExecutionResponse{Execution: execution}, nil
 }
 
+func (s *ManagedExecutionServer) InspectExecution(ctx context.Context, req *reinv1.InspectExecutionRequest) (*reinv1.InspectExecutionResponse, error) {
+	if strings.TrimSpace(req.GetId()) == "" {
+		return nil, status.Error(codes.InvalidArgument, "id is required")
+	}
+
+	execution := &reinv1.Execution{}
+	if _, err := loadStoredProto(ctx, s.store, sqlite.ExecutionKind, req.GetId(), execution); err != nil {
+		return nil, toStatusError("execution", req.GetId(), err)
+	}
+
+	issue := &reinv1.Issue{}
+	if _, err := loadStoredProto(ctx, s.store, sqlite.IssueKind, execution.GetIssueId(), issue); err != nil {
+		return nil, toStatusError("issue", execution.GetIssueId(), err)
+	}
+
+	workflowEntity := &reinv1.Workflow{}
+	if _, err := loadStoredProto(ctx, s.store, sqlite.WorkflowKind, execution.GetWorkflowId(), workflowEntity); err != nil {
+		return nil, toStatusError("workflow", execution.GetWorkflowId(), err)
+	}
+
+	taskSteps, err := s.engine.ListTaskSteps(ctx, execution.GetId())
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "list execution %q task steps: %v", execution.GetId(), err)
+	}
+	sideEffects, err := s.engine.ListSideEffects(ctx, execution.GetId())
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "list execution %q side effects: %v", execution.GetId(), err)
+	}
+
+	stepIndex := workflowStepIndex(workflowEntity)
+	adapters := executionAdapters(s.catalog, workflowEntity)
+
+	return &reinv1.InspectExecutionResponse{
+		Execution:    execution,
+		Issue:        issue,
+		Workflow:     workflowEntity,
+		TaskSteps:    executionTaskSteps(taskSteps, stepIndex),
+		SideEffects:  executionSideEffects(sideEffects, stepIndex),
+		Adapters:     adapters,
+		LookingGlass: executionLookingGlass(adapters),
+	}, nil
+}
+
 func (s *ManagedExecutionServer) CancelExecution(ctx context.Context, req *reinv1.CancelExecutionRequest) (*reinv1.CancelExecutionResponse, error) {
 	if strings.TrimSpace(req.GetId()) == "" {
 		return nil, status.Error(codes.InvalidArgument, "id is required")
@@ -687,4 +731,124 @@ func firstWorkflowAdapter(workflowEntity *reinv1.Workflow) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func workflowStepIndex(workflowEntity *reinv1.Workflow) map[string]*reinv1.WorkflowStep {
+	index := make(map[string]*reinv1.WorkflowStep, len(workflowEntity.GetSteps()))
+	for _, step := range workflowEntity.GetSteps() {
+		if step == nil {
+			continue
+		}
+		index[step.GetId()] = step
+	}
+	return index
+}
+
+func executionTaskSteps(steps []workflow.TaskStep, index map[string]*reinv1.WorkflowStep) []*reinv1.ExecutionTaskStep {
+	out := make([]*reinv1.ExecutionTaskStep, 0, len(steps))
+	for _, step := range steps {
+		workflowStep := index[step.PhaseID]
+		out = append(out, &reinv1.ExecutionTaskStep{
+			PhaseId:   step.PhaseID,
+			PhaseName: workflowStepName(workflowStep, step.PhaseID),
+			AdapterId: workflowStepAdapterID(workflowStep),
+			Lane:      step.Lane,
+			Direction: string(step.Direction),
+			Operation: step.Operation,
+			Status:    string(step.Status),
+			Sequence:  int32(step.Sequence),
+			Error:     step.Error,
+		})
+	}
+	return out
+}
+
+func executionSideEffects(effects []workflow.SideEffect, index map[string]*reinv1.WorkflowStep) []*reinv1.ExecutionSideEffect {
+	out := make([]*reinv1.ExecutionSideEffect, 0, len(effects))
+	for _, effect := range effects {
+		workflowStep := index[effect.PhaseID]
+		out = append(out, &reinv1.ExecutionSideEffect{
+			PhaseId:     effect.PhaseID,
+			PhaseName:   workflowStepName(workflowStep, effect.PhaseID),
+			AdapterId:   workflowStepAdapterID(workflowStep),
+			Lane:        effect.Lane,
+			Direction:   string(effect.Direction),
+			Operation:   effect.Operation,
+			Status:      string(effect.Status),
+			Sequence:    int32(effect.Sequence),
+			Reason:      effect.Reason,
+			TargetPhase: effect.TargetPhase,
+			Inputs:      cloneMap(effect.Inputs),
+			Outputs:     cloneMap(effect.Outputs),
+			Error:       effect.Error,
+		})
+	}
+	return out
+}
+
+func executionAdapters(catalog ManagedCatalog, workflowEntity *reinv1.Workflow) []*reinv1.Adapter {
+	if catalog == nil || workflowEntity == nil {
+		return nil
+	}
+
+	seen := map[string]struct{}{}
+	ids := make([]string, 0, len(workflowEntity.GetSteps()))
+	for _, step := range workflowEntity.GetSteps() {
+		adapterID := strings.TrimSpace(step.GetAdapterId())
+		if adapterID == "" {
+			continue
+		}
+		if _, ok := seen[adapterID]; ok {
+			continue
+		}
+		seen[adapterID] = struct{}{}
+		ids = append(ids, adapterID)
+	}
+	slices.Sort(ids)
+
+	adapters := make([]*reinv1.Adapter, 0, len(ids))
+	for _, id := range ids {
+		if adapter, ok := catalog.Lookup(id); ok {
+			adapters = append(adapters, adapter.Descriptor())
+		}
+	}
+	return adapters
+}
+
+func executionLookingGlass(adapters []*reinv1.Adapter) *reinv1.LookingGlassState {
+	tailAdapters := make([]string, 0, len(adapters))
+	for _, adapter := range adapters {
+		if adapter == nil {
+			continue
+		}
+		if strings.EqualFold(adapter.GetCapabilities()["tail"], "true") {
+			tailAdapters = append(tailAdapters, adapter.GetId())
+		}
+	}
+	slices.Sort(tailAdapters)
+	if len(tailAdapters) == 0 {
+		return &reinv1.LookingGlassState{
+			Status: "No adapters in this execution advertise looking-glass tail support.",
+		}
+	}
+	return &reinv1.LookingGlassState{
+		Supported:  true,
+		Available:  false,
+		AdapterIds: tailAdapters,
+		Status:     "Adapters advertise tail support, but the daemon does not expose looking-glass streaming yet.",
+	}
+}
+
+func workflowStepName(step *reinv1.WorkflowStep, fallback string) string {
+	if step == nil || strings.TrimSpace(step.GetName()) == "" {
+		return fallback
+	}
+	return step.GetName()
+}
+
+func workflowStepAdapterID(step *reinv1.WorkflowStep) string {
+	if step == nil {
+		return ""
+	}
+	return step.GetAdapterId()
 }

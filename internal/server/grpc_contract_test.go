@@ -184,6 +184,8 @@ func unaryExpectation(contract grpcContract) unaryRPCExpectation {
 		return unaryRPCExpectation{code: codes.OK}
 	case reinv1.ExecutionService_GetExecution_FullMethodName:
 		return unaryRPCExpectation{code: codes.InvalidArgument, message: "id is required"}
+	case reinv1.ExecutionService_InspectExecution_FullMethodName:
+		return unaryRPCExpectation{code: codes.InvalidArgument, message: "id is required"}
 	case reinv1.ExecutionService_StartExecution_FullMethodName:
 		return unaryRPCExpectation{code: codes.InvalidArgument, message: "issue_id is required"}
 	case reinv1.ExecutionService_CancelExecution_FullMethodName:
@@ -312,6 +314,14 @@ func allGRPCContracts() []grpcContract {
 			input:      "rein.v1.GetExecutionRequest",
 			output:     "rein.v1.GetExecutionResponse",
 			newRequest: func() proto.Message { return &reinv1.GetExecutionRequest{} },
+		},
+		{
+			service:    "rein.v1.ExecutionService",
+			method:     "InspectExecution",
+			fullMethod: reinv1.ExecutionService_InspectExecution_FullMethodName,
+			input:      "rein.v1.InspectExecutionRequest",
+			output:     "rein.v1.InspectExecutionResponse",
+			newRequest: func() proto.Message { return &reinv1.InspectExecutionRequest{} },
 		},
 		{
 			service:    "rein.v1.ExecutionService",

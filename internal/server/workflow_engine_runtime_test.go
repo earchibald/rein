@@ -112,6 +112,32 @@ func TestManagedServicesWorkflowEngineFlow(t *testing.T) {
 		t.Fatalf("StartExecution() result = %q, want merged", execution.GetMetadata()["result"])
 	}
 
+	inspectResp, err := executionClient.InspectExecution(ctx, &reinv1.InspectExecutionRequest{Id: execution.GetId()})
+	if err != nil {
+		t.Fatalf("InspectExecution() error = %v", err)
+	}
+	if inspectResp.GetExecution().GetId() != execution.GetId() {
+		t.Fatalf("InspectExecution() execution id = %q, want %q", inspectResp.GetExecution().GetId(), execution.GetId())
+	}
+	if inspectResp.GetIssue().GetId() != issueResp.GetIssue().GetId() {
+		t.Fatalf("InspectExecution() issue id = %q, want %q", inspectResp.GetIssue().GetId(), issueResp.GetIssue().GetId())
+	}
+	if inspectResp.GetWorkflow().GetId() != workflowEntity.GetId() {
+		t.Fatalf("InspectExecution() workflow id = %q, want %q", inspectResp.GetWorkflow().GetId(), workflowEntity.GetId())
+	}
+	if len(inspectResp.GetTaskSteps()) != 4 {
+		t.Fatalf("InspectExecution() task steps = %d, want 4", len(inspectResp.GetTaskSteps()))
+	}
+	if inspectResp.GetTaskSteps()[1].GetPhaseName() != "Open pull request" {
+		t.Fatalf("InspectExecution() review phase name = %q, want Open pull request", inspectResp.GetTaskSteps()[1].GetPhaseName())
+	}
+	if !inspectResp.GetLookingGlass().GetSupported() || inspectResp.GetLookingGlass().GetAvailable() {
+		t.Fatalf("InspectExecution() looking glass = %+v, want supported but unavailable", inspectResp.GetLookingGlass())
+	}
+	if got := inspectResp.GetLookingGlass().GetAdapterIds(); !slices.Equal(got, []string{runtimeReviewAdapterID}) {
+		t.Fatalf("InspectExecution() looking glass adapters = %v, want [%s]", got, runtimeReviewAdapterID)
+	}
+
 	getIssueResp, err := issueClient.GetIssue(ctx, &reinv1.GetIssueRequest{Id: issueResp.GetIssue().GetId()})
 	if err != nil {
 		t.Fatalf("GetIssue() error = %v", err)
@@ -149,7 +175,13 @@ func newRuntimeCatalog() *runtimeCatalog {
 			descriptor: &reinv1.Adapter{Id: runtimeCodingAdapterID, Name: "Coding Fake", Category: reinv1.AdapterCategory_ADAPTER_CATEGORY_CODING_AGENT, Enabled: true},
 		},
 		runtimeReviewAdapterID: {
-			descriptor: &reinv1.Adapter{Id: runtimeReviewAdapterID, Name: "Review Fake", Category: reinv1.AdapterCategory_ADAPTER_CATEGORY_REVIEW_AGENT, Enabled: true},
+			descriptor: &reinv1.Adapter{
+				Id:           runtimeReviewAdapterID,
+				Name:         "Review Fake",
+				Category:     reinv1.AdapterCategory_ADAPTER_CATEGORY_REVIEW_AGENT,
+				Enabled:      true,
+				Capabilities: map[string]string{"tail": "true"},
+			},
 		},
 	}}
 }

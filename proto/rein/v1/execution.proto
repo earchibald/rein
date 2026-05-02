@@ -12,6 +12,8 @@ service ExecutionService {
   rpc ListExecutions(ListExecutionsRequest) returns (ListExecutionsResponse);
   // Get a single execution by id.
   rpc GetExecution(GetExecutionRequest) returns (GetExecutionResponse);
+  // Inspect an execution with workflow drilldown details.
+  rpc InspectExecution(InspectExecutionRequest) returns (InspectExecutionResponse);
   // Start a workflow execution for an issue.
   rpc StartExecution(StartExecutionRequest) returns (StartExecutionResponse);
   // Cancel a running execution.
@@ -39,6 +41,56 @@ message GetExecutionRequest {
 
 message GetExecutionResponse {
   Execution execution = 1;
+}
+
+message InspectExecutionRequest {
+  // Execution identifier.
+  string id = 1;
+}
+
+message InspectExecutionResponse {
+  Execution execution = 1;
+  Issue issue = 2;
+  Workflow workflow = 3;
+  repeated ExecutionTaskStep task_steps = 4;
+  repeated ExecutionSideEffect side_effects = 5;
+  repeated Adapter adapters = 6;
+  LookingGlassState looking_glass = 7;
+}
+
+message ExecutionTaskStep {
+  string phase_id = 1;
+  string phase_name = 2;
+  string adapter_id = 3;
+  string lane = 4;
+  string direction = 5;
+  string operation = 6;
+  string status = 7;
+  int32 sequence = 8;
+  string error = 9;
+}
+
+message ExecutionSideEffect {
+  string phase_id = 1;
+  string phase_name = 2;
+  string adapter_id = 3;
+  string lane = 4;
+  string direction = 5;
+  string operation = 6;
+  string status = 7;
+  int32 sequence = 8;
+  string reason = 9;
+  string target_phase = 10;
+  map<string, string> inputs = 11;
+  map<string, string> outputs = 12;
+  string error = 13;
+}
+
+message LookingGlassState {
+  bool supported = 1;
+  bool available = 2;
+  repeated string adapter_ids = 3;
+  string status = 4;
 }
 
 message StartExecutionRequest {

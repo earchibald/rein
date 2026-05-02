@@ -18,9 +18,16 @@ Modular orchestrator daemon — successor to op-obsidian. Go daemon + plural HMI
 - Use `rein doctor` to inspect the selected instance and emit machine-parseable JSON readiness diagnostics.
 - Use `rein describe-as=cli` for a manual-style, machine-consumable description of the CLI/gRPC surface and reachable protobuf schemas.
 - Use `rein describe-as=mcp` for a stable YAML description of commands, flags, gateway stub routes, and schemas suitable for wrapper/skill tooling.
+- Use `rein tui` for the terminal-native HMI over that same daemon surface.
 - Service commands mirror the protobuf API: `rein project|issue|execution|workflow|adapter <verb>`.
 - Request flags map 1:1 to top-level gRPC request fields. Scalar fields take plain values; message, repeated, and map fields take JSON blobs.
 - Responses are emitted as JSON using protobuf field names.
+
+## TUI
+
+- `rein tui` reads projects, issues, executions, workflow drilldown, and adapter capability state over the canonical gRPC API.
+- Execution drilldown includes workflow steps, side effects, execution metadata, and looking-glass status for any adapter that advertises `capabilities.tail=true`.
+- Looking-glass tailing is capability-gated: when adapters advertise tail support but the daemon cannot stream it yet, the TUI shows that state instead of assuming live tail availability.
 
 ## Development
 
