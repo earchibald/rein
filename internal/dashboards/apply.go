@@ -15,6 +15,7 @@ import (
 	"time"
 )
 
+// #nosec G101 -- this is the public header name SigNoz expects, not a credential.
 const sigNozAPIKeyHeader = "SIGNOZ-API-KEY"
 
 type ApplyOptions struct {
@@ -235,7 +236,7 @@ func (c *sigNozClient) updateDashboard(ctx context.Context, dashboardID string, 
 	return dashboard, nil
 }
 
-func (c *sigNozClient) do(ctx context.Context, method, path string, payload any, out any) error {
+func (c *sigNozClient) do(ctx context.Context, method, path string, payload, out any) error {
 	if c.httpClient == nil {
 		c.httpClient = &http.Client{Timeout: 15 * time.Second}
 	}

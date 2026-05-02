@@ -156,7 +156,11 @@ func (a *app) serveDaemon(config daemonServeConfig) error {
 	if err != nil {
 		return fmt.Errorf("configure OTLP telemetry: %w", err)
 	}
-	defer daemonTelemetry.Shutdown(context.Background())
+	defer func() {
+		if shutdownErr := daemonTelemetry.Shutdown(context.Background()); shutdownErr != nil {
+			_, _ = fmt.Fprintf(a.stderr, "rein: shutdown telemetry: %v\n", shutdownErr)
+		}
+	}()
 
 	logger := daemonTelemetry.Logger
 	if err := config.instance.EnsureRootDir(); err != nil {
