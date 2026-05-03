@@ -995,59 +995,59 @@ func workflowStepAdapterID(step *reinv1.WorkflowStep) string {
 // letter. A single-word id contributes its first two characters. The result is
 // always uppercased (e.g. "rein-demo" → "RD", "myproject" → "MY").
 func deriveIssuePrefix(id string) string {
-parts := strings.FieldsFunc(id, func(r rune) bool {
-return r == '-' || r == '_' || unicode.IsSpace(r)
-})
-var buf strings.Builder
-for _, p := range parts {
-for _, r := range p {
-if unicode.IsLetter(r) || unicode.IsDigit(r) {
-buf.WriteRune(unicode.ToUpper(r))
-break
-}
-}
-}
-if buf.Len() == 0 {
-// Fallback: take first two meaningful characters of the raw id.
-for _, r := range id {
-if unicode.IsLetter(r) || unicode.IsDigit(r) {
-buf.WriteRune(unicode.ToUpper(r))
-if buf.Len() == 2 {
-break
-}
-}
-}
-}
-if buf.Len() == 1 {
-// Pad single-letter prefixes with the second meaningful character.
-skip := true
-for _, r := range id {
-if unicode.IsLetter(r) || unicode.IsDigit(r) {
-if skip {
-skip = false
-continue
-}
-buf.WriteRune(unicode.ToUpper(r))
-break
-}
-}
-}
-return buf.String()
+	parts := strings.FieldsFunc(id, func(r rune) bool {
+		return r == '-' || r == '_' || unicode.IsSpace(r)
+	})
+	var buf strings.Builder
+	for _, p := range parts {
+		for _, r := range p {
+			if unicode.IsLetter(r) || unicode.IsDigit(r) {
+				buf.WriteRune(unicode.ToUpper(r))
+				break
+			}
+		}
+	}
+	if buf.Len() == 0 {
+		// Fallback: take first two meaningful characters of the raw id.
+		for _, r := range id {
+			if unicode.IsLetter(r) || unicode.IsDigit(r) {
+				buf.WriteRune(unicode.ToUpper(r))
+				if buf.Len() == 2 {
+					break
+				}
+			}
+		}
+	}
+	if buf.Len() == 1 {
+		// Pad single-letter prefixes with the second meaningful character.
+		skip := true
+		for _, r := range id {
+			if unicode.IsLetter(r) || unicode.IsDigit(r) {
+				if skip {
+					skip = false
+					continue
+				}
+				buf.WriteRune(unicode.ToUpper(r))
+				break
+			}
+		}
+	}
+	return buf.String()
 }
 
 // validateIssuePrefixFormat rejects prefixes that would produce ambiguous IDs.
 // A valid prefix is 1–8 uppercase alphanumeric characters.
 func validateIssuePrefixFormat(prefix string) error {
-if prefix == "" {
-return fmt.Errorf("issue prefix must not be empty")
-}
-if len(prefix) > 8 {
-return fmt.Errorf("issue prefix %q exceeds 8 characters", prefix)
-}
-for _, r := range prefix {
-if !unicode.IsUpper(r) && !unicode.IsDigit(r) {
-return fmt.Errorf("issue prefix %q must contain only uppercase letters and digits", prefix)
-}
-}
-return nil
+	if prefix == "" {
+		return fmt.Errorf("issue prefix must not be empty")
+	}
+	if len(prefix) > 8 {
+		return fmt.Errorf("issue prefix %q exceeds 8 characters", prefix)
+	}
+	for _, r := range prefix {
+		if !unicode.IsUpper(r) && !unicode.IsDigit(r) {
+			return fmt.Errorf("issue prefix %q must contain only uppercase letters and digits", prefix)
+		}
+	}
+	return nil
 }
