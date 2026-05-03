@@ -26,6 +26,18 @@ It also deliberately keeps some work out of tree:
 - Wiring observability? Read [Metrics, logs, and OTLP](metrics-logs-otlp.md).
 - Adding marketplace entries or local manifests? Read the [Plugin author guide](plugin-author-guide.md).
 - Moving data over from op-obsidian? Read the [Migration guide](migration-guide.md).
+- Need the full table of contents? See the [Docs summary](SUMMARY.md).
+
+<div hidden>
+
+[[cli-quickstart|CLI quickstart]]
+[[tui-quickstart|TUI quickstart]]
+[[metrics-logs-otlp|Metrics, logs, and OTLP]]
+[[plugin-author-guide|Plugin author guide]]
+[[migration-guide|Migration guide]]
+[[SUMMARY|Docs summary]]
+
+</div>
 
 ## Serving the docs site locally
 

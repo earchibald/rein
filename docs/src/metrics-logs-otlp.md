@@ -132,3 +132,23 @@ The dashboards marketplace currently points at the bundled local `rein-dashboard
 - OTLP export is daemon-only; the CLI itself does not expose a separate observability pipeline
 - `rein dashboards apply` supports bundled local dashboard plugins today, not remote bootstrap
 - the TUI can show looking-glass/tail support state, but rein does not yet stream live tails
+
+## Related docs
+
+- [Overview](README.md)
+- [CLI quickstart](cli-quickstart.md)
+- [TUI quickstart](tui-quickstart.md)
+- [Plugin author guide](plugin-author-guide.md)
+- [Migration guide](migration-guide.md)
+- [Docs summary](SUMMARY.md)
+
+<div hidden>
+
+[[README|Overview]]
+[[cli-quickstart|CLI quickstart]]
+[[tui-quickstart|TUI quickstart]]
+[[plugin-author-guide|Plugin author guide]]
+[[migration-guide|Migration guide]]
+[[SUMMARY|Docs summary]]
+
+</div>
