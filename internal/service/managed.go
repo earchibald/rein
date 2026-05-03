@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
@@ -191,6 +193,34 @@ func (s *ManagedProjectServer) CreateProject(ctx context.Context, req *reinv1.Cr
 	if strings.TrimSpace(project.GetId()) == "" {
 		return nil, status.Error(codes.InvalidArgument, "project.id is required")
 	}
+
+	// Derive issue_prefix from project id when the caller omits it.
+	if strings.TrimSpace(project.GetIssuePrefix()) == "" {
+		project.IssuePrefix = deriveIssuePrefix(project.GetId())
+	} else {
+		project.IssuePrefix = strings.ToUpper(strings.TrimSpace(project.GetIssuePrefix()))
+	}
+	if err := validateIssuePrefixFormat(project.GetIssuePrefix()); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "project.issue_prefix: %v", err)
+	}
+
+	// Reject if id, slug, or issue_prefix collides with any existing project.
+	existing, err := listStoredMessages(ctx, s.store, sqlite.ProjectKind, func() *reinv1.Project { return &reinv1.Project{} })
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "list projects: %v", err)
+	}
+	for _, p := range existing {
+		if p.GetId() == project.GetId() {
+			return nil, status.Errorf(codes.AlreadyExists, "project with id %q already exists", project.GetId())
+		}
+		if project.GetSlug() != "" && p.GetSlug() == project.GetSlug() {
+			return nil, status.Errorf(codes.AlreadyExists, "project with slug %q already exists", project.GetSlug())
+		}
+		if p.GetIssuePrefix() == project.GetIssuePrefix() {
+			return nil, status.Errorf(codes.AlreadyExists, "project %q already uses issue_prefix %q", p.GetId(), project.GetIssuePrefix())
+		}
+	}
+
 	if project.GetStatus() == reinv1.ProjectStatus_PROJECT_STATUS_UNSPECIFIED {
 		project.Status = reinv1.ProjectStatus_PROJECT_STATUS_ACTIVE
 	}
@@ -297,12 +327,19 @@ func (s *ManagedIssueServer) CreateIssue(ctx context.Context, req *reinv1.Create
 		return nil, status.Error(codes.InvalidArgument, "issue is required")
 	}
 	issue := proto.Clone(req.GetIssue()).(*reinv1.Issue)
-	if strings.TrimSpace(issue.GetId()) == "" {
-		return nil, status.Error(codes.InvalidArgument, "issue.id is required")
-	}
 	if strings.TrimSpace(issue.GetProjectId()) == "" {
 		return nil, status.Error(codes.InvalidArgument, "issue.project_id is required")
 	}
+
+	// Auto-generate id when the caller omits it.
+	if strings.TrimSpace(issue.GetId()) == "" {
+		generated, err := s.nextIssueID(ctx, issue.GetProjectId())
+		if err != nil {
+			return nil, err
+		}
+		issue.Id = generated
+	}
+
 	if issue.GetStatus() == reinv1.IssueStatus_ISSUE_STATUS_UNSPECIFIED {
 		issue.Status = reinv1.IssueStatus_ISSUE_STATUS_OPEN
 	}
@@ -319,6 +356,43 @@ func (s *ManagedIssueServer) CreateIssue(ctx context.Context, req *reinv1.Create
 		return nil, status.Errorf(codes.Internal, "create issue %q: %v", issue.GetId(), err)
 	}
 	return &reinv1.CreateIssueResponse{Issue: issue}, nil
+}
+
+// nextIssueID returns the next sequential ID for the given project using the
+// project's issue_prefix (e.g. "RD-7"). It loads the project record and scans
+// all existing issues in the project to find the highest suffix already in use.
+func (s *ManagedIssueServer) nextIssueID(ctx context.Context, projectID string) (string, error) {
+	project := &reinv1.Project{}
+	if _, err := loadStoredProto(ctx, s.store, sqlite.ProjectKind, projectID, project); err != nil {
+		return "", toStatusError("project", projectID, err)
+	}
+
+	prefix := project.GetIssuePrefix()
+	if prefix == "" {
+		return "", status.Errorf(codes.FailedPrecondition, "project %q has no issue_prefix; cannot auto-generate issue id", projectID)
+	}
+
+	issues, err := listStoredMessages(ctx, s.store, sqlite.IssueKind, func() *reinv1.Issue { return &reinv1.Issue{} })
+	if err != nil {
+		return "", status.Errorf(codes.Internal, "list issues for project %q: %v", projectID, err)
+	}
+
+	pattern := regexp.MustCompile(`^` + regexp.QuoteMeta(prefix) + `-(\d+)$`)
+	maxSeq := 0
+	for _, issue := range issues {
+		if issue.GetProjectId() != projectID {
+			continue
+		}
+		matches := pattern.FindStringSubmatch(issue.GetId())
+		if matches == nil {
+			continue
+		}
+		n, err := strconv.Atoi(matches[1])
+		if err == nil && n > maxSeq {
+			maxSeq = n
+		}
+	}
+	return fmt.Sprintf("%s-%d", prefix, maxSeq+1), nil
 }
 
 func (s *ManagedIssueServer) GetIssue(ctx context.Context, req *reinv1.GetIssueRequest) (*reinv1.GetIssueResponse, error) {
@@ -914,4 +988,66 @@ func workflowStepAdapterID(step *reinv1.WorkflowStep) string {
 		return ""
 	}
 	return step.GetAdapterId()
+}
+
+// deriveIssuePrefix builds a short uppercase prefix from a project id or slug.
+// Each word (split on hyphens, underscores, or spaces) contributes its first
+// letter. A single-word id contributes its first two characters. The result is
+// always uppercased (e.g. "rein-demo" → "RD", "myproject" → "MY").
+func deriveIssuePrefix(id string) string {
+	parts := strings.FieldsFunc(id, func(r rune) bool {
+		return r == '-' || r == '_' || unicode.IsSpace(r)
+	})
+	var buf strings.Builder
+	for _, p := range parts {
+		for _, r := range p {
+			if unicode.IsLetter(r) || unicode.IsDigit(r) {
+				buf.WriteRune(unicode.ToUpper(r))
+				break
+			}
+		}
+	}
+	if buf.Len() == 0 {
+		// Fallback: take first two meaningful characters of the raw id.
+		for _, r := range id {
+			if unicode.IsLetter(r) || unicode.IsDigit(r) {
+				buf.WriteRune(unicode.ToUpper(r))
+				if buf.Len() == 2 {
+					break
+				}
+			}
+		}
+	}
+	if buf.Len() == 1 {
+		// Pad single-letter prefixes with the second meaningful character.
+		skip := true
+		for _, r := range id {
+			if unicode.IsLetter(r) || unicode.IsDigit(r) {
+				if skip {
+					skip = false
+					continue
+				}
+				buf.WriteRune(unicode.ToUpper(r))
+				break
+			}
+		}
+	}
+	return buf.String()
+}
+
+// validateIssuePrefixFormat rejects prefixes that would produce ambiguous IDs.
+// A valid prefix is 1–8 uppercase alphanumeric characters.
+func validateIssuePrefixFormat(prefix string) error {
+	if prefix == "" {
+		return fmt.Errorf("issue prefix must not be empty")
+	}
+	if len(prefix) > 8 {
+		return fmt.Errorf("issue prefix %q exceeds 8 characters", prefix)
+	}
+	for _, r := range prefix {
+		if !unicode.IsUpper(r) && !unicode.IsDigit(r) {
+			return fmt.Errorf("issue prefix %q must contain only uppercase letters and digits", prefix)
+		}
+	}
+	return nil
 }

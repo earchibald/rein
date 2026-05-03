@@ -24,12 +24,12 @@ Options:
 
 Notes:
   - The target rein daemon must already be running for the selected instance.
-  - The seeded issue set is:
-      RD-1 scaffold the project with an agent prompt
-      RD-2 replace the hello-world print with a greet helper
-      RD-3 accept a name argument
-      RD-4 add a README quickstart
-      RD-5 add a unit test for the greeting helper
+  - The seeded issue set (IDs assigned by the daemon, e.g. RD-1..RD-5):
+      scaffold the project with an agent prompt
+      replace the hello-world print with a greet helper
+      accept a name argument
+      add a README quickstart
+      add a unit test for the greeting helper
 EOF
 }
 
@@ -201,42 +201,46 @@ upsert_project() {
   fi
 }
 
-upsert_issue() {
-  local issue_id="$1"
+# create_issue_if_absent creates an issue only when no issue with that title
+# already exists in the project. IDs are assigned by the daemon (auto-generated
+# from the project's issue_prefix). On a clean seed they will be RD-1..RD-5.
+create_issue_if_absent() {
+  local title="$1"
   local payload="$2"
-  if run_rein issue get --id "$issue_id" >/dev/null 2>&1; then
-    run_rein issue update --issue "$payload" >/dev/null
-  else
-    run_rein issue create --issue "$payload" >/dev/null
+  local existing
+  existing=$(run_rein issue list --project_id "$project_id" 2>/dev/null || true)
+  if echo "$existing" | grep -qF "$title"; then
+    return
   fi
+  run_rein issue create --issue "$payload" >/dev/null
 }
 
 seed_rein_project() {
   local project_payload
-  project_payload=$(cat <<'EOF'
-{"id":"rein-demo","slug":"rein-demo","displayName":"rein-demo","summary":"Repeatable first-run training project backed by a tiny Rust binary repo.","status":"PROJECT_STATUS_ACTIVE"}
+  project_payload=$(cat <<EOF
+{"id":"rein-demo","slug":"rein-demo","displayName":"rein-demo","summary":"Repeatable first-run training project backed by a tiny Rust binary repo.","status":"PROJECT_STATUS_ACTIVE","repoPath":"$repo_dir"}
 EOF
 )
   upsert_project "$project_payload"
 
-  upsert_issue "RD-1" "$(cat <<'EOF'
-{"id":"RD-1","projectId":"rein-demo","title":"Scaffold the demo project with an agent prompt","summary":"Seed the repeatable training loop for the lightweight Rust demo repository.","status":"ISSUE_STATUS_OPEN","priority":"ISSUE_PRIORITY_HIGH","assignee":"operator"}
+  create_issue_if_absent "Scaffold the demo project with an agent prompt" "$(cat <<'EOF'
+{"projectId":"rein-demo","title":"Scaffold the demo project with an agent prompt","summary":"Seed the repeatable training loop for the lightweight Rust demo repository.","priority":"ISSUE_PRIORITY_HIGH","assignee":"operator"}
 EOF
 )"
-  upsert_issue "RD-2" "$(cat <<'EOF'
-{"id":"RD-2","projectId":"rein-demo","title":"Replace the hello-world print with a reusable greet helper","summary":"Refactor the default cargo scaffold so greeting logic is reusable and ready for tests.","status":"ISSUE_STATUS_OPEN","priority":"ISSUE_PRIORITY_MEDIUM","assignee":"operator"}
+  create_issue_if_absent "Replace the hello-world print with a reusable greet helper" "$(cat <<'EOF'
+{"projectId":"rein-demo","title":"Replace the hello-world print with a reusable greet helper","summary":"Refactor the default cargo scaffold so greeting logic is reusable and ready for tests.","priority":"ISSUE_PRIORITY_MEDIUM","assignee":"operator"}
 EOF
 )"
-  upsert_issue "RD-3" "$(cat <<'EOF'
-{"id":"RD-3","projectId":"rein-demo","title":"Accept a name argument for a personalized greeting","summary":"Extend the tiny Rust binary to accept one name argument without adding heavy dependencies.","status":"ISSUE_STATUS_OPEN","priority":"ISSUE_PRIORITY_MEDIUM","assignee":"operator"}
+  create_issue_if_absent "Accept a name argument for a personalized greeting" "$(cat <<'EOF'
+{"projectId":"rein-demo","title":"Accept a name argument for a personalized greeting","summary":"Extend the tiny Rust binary to accept one name argument without adding heavy dependencies.","priority":"ISSUE_PRIORITY_MEDIUM","assignee":"operator"}
 EOF
 )"
-  upsert_issue "RD-4" "$(cat <<'EOF'
-{"id":"RD-4","projectId":"rein-demo","title":"Add a README quickstart for build and run","summary":"Document how to build and run the tiny Rust demo so the training repo has an obvious landing page.","status":"ISSUE_STATUS_OPEN","priority":"ISSUE_PRIORITY_MEDIUM","assignee":"operator"}
+  create_issue_if_absent "Add a README quickstart for build and run" "$(cat <<'EOF'
+{"projectId":"rein-demo","title":"Add a README quickstart for build and run","summary":"Document how to build and run the tiny Rust demo so the training repo has an obvious landing page.","priority":"ISSUE_PRIORITY_MEDIUM","assignee":"operator"}
 EOF
 )"
-  upsert_issue "RD-5" "$(cat <<'EOF'
-{"id":"RD-5","projectId":"rein-demo","title":"Add a unit test for the greeting helper","summary":"Introduce one small automated test so the training loop exercises a trivial code-plus-test change.","status":"ISSUE_STATUS_OPEN","priority":"ISSUE_PRIORITY_MEDIUM","assignee":"operator"}
+  create_issue_if_absent "Add a unit test for the greeting helper" "$(cat <<'EOF'
+{"projectId":"rein-demo","title":"Add a unit test for the greeting helper","summary":"Introduce one small automated test so the training loop exercises a trivial code-plus-test change.","priority":"ISSUE_PRIORITY_MEDIUM","assignee":"operator"}
 EOF
 )"
 }
@@ -253,7 +257,7 @@ rein-demo bootstrap complete
   state_home: $state_home
   instance: $instance
   project_id: $project_id
-  seeded_issues: RD-1 RD-2 RD-3 RD-4 RD-5
+  seeded_issues: 5 issues (RD-1 through RD-5 on a fresh instance)
 EOF
   if [[ -n "$github_url" ]]; then
     echo "  github_repo: $github_url"

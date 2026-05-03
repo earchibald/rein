@@ -64,6 +64,15 @@ message Project {
   google.protobuf.Timestamp created_time = 6;
   google.protobuf.Timestamp updated_time = 7;
   map<string, string> labels = 8;
+  // issue_prefix is the short uppercase token prepended to auto-generated issue
+  // IDs for this project (e.g. "RD" yields RD-1, RD-2, …). Must be unique
+  // across all registered projects. When omitted on CreateProject the daemon
+  // derives a value from the project id.
+  string issue_prefix = 9;
+  // repo_path is the optional local filesystem path to the project's source
+  // repository (e.g. /Users/jane/Projects/rein-demo). Used by adapters that
+  // need to know where to check out or clone the repository.
+  string repo_path = 10;
 }
 
 message Issue {
