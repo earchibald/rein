@@ -60,3 +60,23 @@ This split is deliberate:
 - the rein daemon stays free of source-system-specific dependencies once the migration is done
 
 If you need migration behavior beyond projects/issues, track that work in the external migration repo rather than assuming the core daemon already supports it.
+
+## Related docs
+
+- [Overview](README.md)
+- [CLI quickstart](cli-quickstart.md)
+- [TUI quickstart](tui-quickstart.md)
+- [Metrics, logs, and OTLP](metrics-logs-otlp.md)
+- [Plugin author guide](plugin-author-guide.md)
+- [Docs summary](SUMMARY.md)
+
+<div hidden>
+
+[[README|Overview]]
+[[cli-quickstart|CLI quickstart]]
+[[tui-quickstart|TUI quickstart]]
+[[metrics-logs-otlp|Metrics, logs, and OTLP]]
+[[plugin-author-guide|Plugin author guide]]
+[[SUMMARY|Docs summary]]
+
+</div>

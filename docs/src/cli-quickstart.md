@@ -175,3 +175,23 @@ Once the daemon has enough project/issue/execution state to browse, launch:
 ```
 
 See the [TUI quickstart](tui-quickstart.md) for the keymap and drilldown behavior.
+
+## Related docs
+
+- [Overview](README.md)
+- [TUI quickstart](tui-quickstart.md)
+- [Metrics, logs, and OTLP](metrics-logs-otlp.md)
+- [Plugin author guide](plugin-author-guide.md)
+- [Migration guide](migration-guide.md)
+- [Docs summary](SUMMARY.md)
+
+<div hidden>
+
+[[README|Overview]]
+[[tui-quickstart|TUI quickstart]]
+[[metrics-logs-otlp|Metrics, logs, and OTLP]]
+[[plugin-author-guide|Plugin author guide]]
+[[migration-guide|Migration guide]]
+[[SUMMARY|Docs summary]]
+
+</div>

@@ -143,3 +143,23 @@ Today:
 - `rein dashboards apply` only installs bundled local dashboard plugins
 
 If you are documenting or shipping a plugin, be explicit about which parts are discovery metadata versus actually executable bootstrap today.
+
+## Related docs
+
+- [Overview](README.md)
+- [CLI quickstart](cli-quickstart.md)
+- [TUI quickstart](tui-quickstart.md)
+- [Metrics, logs, and OTLP](metrics-logs-otlp.md)
+- [Migration guide](migration-guide.md)
+- [Docs summary](SUMMARY.md)
+
+<div hidden>
+
+[[README|Overview]]
+[[cli-quickstart|CLI quickstart]]
+[[tui-quickstart|TUI quickstart]]
+[[metrics-logs-otlp|Metrics, logs, and OTLP]]
+[[migration-guide|Migration guide]]
+[[SUMMARY|Docs summary]]
+
+</div>
