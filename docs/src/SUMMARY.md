@@ -1,6 +1,7 @@
 # Summary
 
 - [Overview](README.md)
+- [First-run operator walkthrough](first-run-operator-walkthrough.md)
 - [CLI quickstart](cli-quickstart.md)
 - [TUI quickstart](tui-quickstart.md)
 - [Metrics, logs, and OTLP](metrics-logs-otlp.md)

@@ -63,6 +63,7 @@ Re-running the command skips unchanged bundled dashboards and reports `createdId
 Longer user guides live under `docs/` and can be read directly in the repo or served as an mdBook:
 
 - [Docs overview](docs/src/README.md)
+- [First-run operator walkthrough](docs/src/first-run-operator-walkthrough.md)
 - [CLI quickstart](docs/src/cli-quickstart.md)
 - [TUI quickstart](docs/src/tui-quickstart.md)
 - [Metrics, logs, and OTLP](docs/src/metrics-logs-otlp.md)
