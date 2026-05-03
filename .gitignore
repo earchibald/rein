@@ -16,3 +16,6 @@ docs/book/
 
 # golangci-lint cache
 .golangci-lint-cache/
+
+# rein backups
+backups/
