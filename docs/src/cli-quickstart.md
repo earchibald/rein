@@ -88,38 +88,37 @@ Responses are emitted with protobuf field names (snake_case).
 
 ## 6. Create some data
 
-Create a project:
+Create a project — the daemon auto-derives an `issuePrefix` from the id (e.g. `rein-demo` → `RD`) and returns it in the response:
 
 ```bash
 ./bin/rein project create --project '{
-  "id": "rein",
-  "slug": "rein",
-  "displayName": "rein",
-  "summary": "Local rein project",
+  "id": "rein-demo",
+  "slug": "rein-demo",
+  "displayName": "Rein Demo",
+  "summary": "Repeatable first-run training project",
   "status": "PROJECT_STATUS_ACTIVE"
 }'
 ```
 
-Create an issue in that project:
+Create an issue — omit `id` and the daemon generates one automatically (`RD-1`, `RD-2`, …). Supply an explicit `id` only when integrating with an external system that owns its own identifier scheme:
 
 ```bash
 ./bin/rein issue create --issue '{
-  "id": "RN-28",
-  "projectId": "rein",
-  "title": "User docs",
-  "summary": "README, quickstarts, telemetry, and migration docs",
+  "projectId": "rein-demo",
+  "title": "Scaffold the demo project with an agent prompt",
+  "summary": "Seed the repeatable training loop for the lightweight Rust demo repository.",
   "status": "ISSUE_STATUS_IN_PROGRESS",
   "priority": "ISSUE_PRIORITY_HIGH",
-  "assignee": "copilot"
+  "assignee": "operator"
 }'
 ```
 
-Filter the lists back down:
+Filter the lists back down (the auto-generated id is returned in the create response):
 
 ```bash
-./bin/rein issue list --project_id rein --status ISSUE_STATUS_IN_PROGRESS
-./bin/rein project get --id rein
-./bin/rein issue get --id RN-28
+./bin/rein issue list --project_id rein-demo --status ISSUE_STATUS_IN_PROGRESS
+./bin/rein project get --id rein-demo
+./bin/rein issue get --id RD-1
 ```
 
 ## 7. Use backup and restore intentionally
