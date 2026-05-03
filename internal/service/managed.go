@@ -277,6 +277,22 @@ func (s *ManagedProjectServer) UpdateProject(ctx context.Context, req *reinv1.Up
 	if project.Labels == nil {
 		project.Labels = map[string]string{}
 	}
+
+	// issue_prefix is immutable: once assigned it cannot be changed because all
+	// existing issue IDs depend on it. Always carry the stored value forward.
+	if current.GetIssuePrefix() != "" {
+		if project.GetIssuePrefix() != "" && project.GetIssuePrefix() != current.GetIssuePrefix() {
+			return nil, status.Errorf(codes.InvalidArgument,
+				"project.issue_prefix cannot be changed after creation (current: %q)", current.GetIssuePrefix())
+		}
+		project.IssuePrefix = current.GetIssuePrefix()
+	}
+
+	// repo_path: preserve current value when the caller omits it.
+	if strings.TrimSpace(project.GetRepoPath()) == "" {
+		project.RepoPath = current.GetRepoPath()
+	}
+
 	project.UpdatedTime = timestamppb.Now()
 
 	if err := updateStoredProto(ctx, s.store, sqlite.ProjectKind, project.GetId(), record.LockVersion, project); err != nil {
