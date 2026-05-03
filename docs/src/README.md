@@ -21,8 +21,9 @@ It also deliberately keeps some work out of tree:
 
 ## Start here
 
-- New operator? Read the [CLI quickstart](cli-quickstart.md).
-- Prefer a terminal UI? Read the [TUI quickstart](tui-quickstart.md).
+- Totally fresh to rein? Start with the [first-run operator walkthrough](first-run-operator-walkthrough.md).
+- Need the canonical command flow in more detail? Read the [CLI quickstart](cli-quickstart.md).
+- Prefer a terminal UI after the first run? Read the [TUI quickstart](tui-quickstart.md).
 - Wiring observability? Read [Metrics, logs, and OTLP](metrics-logs-otlp.md).
 - Adding marketplace entries or local manifests? Read the [Plugin author guide](plugin-author-guide.md).
 - Moving data over from op-obsidian? Read the [Migration guide](migration-guide.md).
@@ -57,3 +58,4 @@ These docs intentionally describe the shipped behavior in this tree today:
 - remote adapters can be discovered through the marketplace, but remote managed execution is still a stub
 - remote dashboard plugin sources are parsed by the loader, but `rein dashboards apply` currently installs bundled local plugins only
 - looking-glass tail support is surfaced in CLI/TUI status, but the daemon does not yet stream live tails
+- a browser/web operator UI is not shipped yet; the HTTP/SSE gateway remains a stub

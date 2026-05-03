@@ -19,3 +19,6 @@ docs/book/
 
 # rein backups
 backups/
+
+# Local scratch state used by docs and demo bootstrap flows
+.tmp/

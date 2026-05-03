@@ -2,6 +2,8 @@
 
 `rein tui` is the terminal-native view over the same daemon API that the CLI uses. It is best when you want to browse projects, issues, executions, workflow drilldown, and adapter capability state without manually issuing several list/get commands.
 
+If this is your very first rein session, start with the [first-run operator walkthrough](first-run-operator-walkthrough.md) so the daemon, instance, and sample data are already in place before you open the TUI.
+
 ## 1. Start the daemon first
 
 The TUI is a client, not a standalone store browser, so it needs a running daemon:

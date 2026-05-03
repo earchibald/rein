@@ -2,6 +2,8 @@
 
 This guide assumes you are working from a checkout of `earchibald/rein` and want to exercise the current daemon + CLI flow without guessing at the request shape.
 
+If you are totally fresh to rein and want a disposable first run with sample data, start with the [first-run operator walkthrough](first-run-operator-walkthrough.md) before using this deeper CLI reference.
+
 ## 1. Build the binary
 
 Rein currently builds from source with Go 1.25:
