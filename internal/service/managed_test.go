@@ -743,3 +743,65 @@ func TestCreateIssueAutoID(t *testing.T) {
 		t.Errorf("auto id after gap = %q, want RD-100", got)
 	}
 }
+
+func TestUpdateProjectPreservesIssuePrefixAndRepoPath(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store, err := sqlite.OpenInMemoryAndMigrate(ctx, t.Name())
+	if err != nil {
+		t.Fatalf("OpenInMemoryAndMigrate() error = %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	svc := &ManagedProjectServer{store: store}
+
+	// Create with auto-derived prefix and a repo_path.
+	createResp, err := svc.CreateProject(ctx, &reinv1.CreateProjectRequest{
+		Project: &reinv1.Project{
+			Id:       "rein-demo",
+			RepoPath: "/tmp/rein-demo",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	if got := createResp.GetProject().GetIssuePrefix(); got != "RD" {
+		t.Fatalf("create: issue_prefix = %q, want RD", got)
+	}
+
+	// Update omitting both issue_prefix and repo_path — both should be preserved.
+	updateResp, err := svc.UpdateProject(ctx, &reinv1.UpdateProjectRequest{
+		Project: &reinv1.Project{
+			Id:          "rein-demo",
+			DisplayName: "Rein Demo Updated",
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpdateProject() error = %v", err)
+	}
+	if got := updateResp.GetProject().GetIssuePrefix(); got != "RD" {
+		t.Errorf("update: issue_prefix = %q, want RD", got)
+	}
+	if got := updateResp.GetProject().GetRepoPath(); got != "/tmp/rein-demo" {
+		t.Errorf("update: repo_path = %q, want /tmp/rein-demo", got)
+	}
+
+	// Attempting to change issue_prefix should be rejected.
+	_, err = svc.UpdateProject(ctx, &reinv1.UpdateProjectRequest{
+		Project: &reinv1.Project{Id: "rein-demo", IssuePrefix: "XX"},
+	})
+	if err == nil {
+		t.Fatal("expected error when changing issue_prefix, got nil")
+	}
+
+	// repo_path can be changed via update.
+	updateResp2, err := svc.UpdateProject(ctx, &reinv1.UpdateProjectRequest{
+		Project: &reinv1.Project{Id: "rein-demo", RepoPath: "/projects/rein-demo"},
+	})
+	if err != nil {
+		t.Fatalf("UpdateProject(new repo_path) error = %v", err)
+	}
+	if got := updateResp2.GetProject().GetRepoPath(); got != "/projects/rein-demo" {
+		t.Errorf("update: repo_path = %q, want /projects/rein-demo", got)
+	}
+}
