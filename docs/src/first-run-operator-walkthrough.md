@@ -59,7 +59,9 @@ For deeper CLI details after this pass, continue with the [CLI quickstart](cli-q
 
 ## 4. Seed a tiny repeatable training dataset
 
-Create one project and one issue so the lists and TUI have something real to show:
+Create one project and one issue so the lists and TUI have something real to show.
+
+The daemon auto-derives an `issue_prefix` from the project id (e.g. `rein-demo` → `RD`) and auto-generates issue IDs (e.g. `RD-1`, `RD-2`, …) when the caller omits `id`. You may supply an explicit `id` when you want to pin or import one.
 
 ```bash
 export XDG_STATE_HOME="$PWD/.tmp/rein-state"
@@ -69,15 +71,14 @@ export XDG_STATE_HOME="$PWD/.tmp/rein-state"
   "slug": "rein-demo",
   "displayName": "rein-demo",
   "summary": "Repeatable first-run training project",
-  "status": "PROJECT_STATUS_ACTIVE"
+  "status": "PROJECT_STATUS_ACTIVE",
+  "repoPath": "/Users/earchibald/Projects/rein-demo"
 }'
 
 ./bin/rein --instance demo issue create --issue '{
-  "id": "RD-1",
   "projectId": "rein-demo",
   "title": "Scaffold the demo project with an agent prompt",
   "summary": "Seed the repeatable training loop for the lightweight Rust demo repository.",
-  "status": "ISSUE_STATUS_OPEN",
   "priority": "ISSUE_PRIORITY_HIGH",
   "assignee": "operator"
 }'
@@ -87,7 +88,7 @@ export XDG_STATE_HOME="$PWD/.tmp/rein-state"
 ./bin/rein --instance demo issue get --id RD-1
 ```
 
-This gives you a stable first issue for repeated operator training: `RD-1` is always the bootstrap issue for the demo project.
+The project create response includes the derived `issuePrefix` field. The issue create response includes the auto-generated `id` (`RD-1` for the first issue). Omitting `id` is the recommended default; supply an explicit id only when integrating with an external system that owns its own identifier scheme.
 
 ## 5. Launch the TUI against the same instance
 
@@ -153,7 +154,7 @@ The bootstrap defaults to a private GitHub repo. Pass `--github-visibility publi
 
 ## 8. Fixed repeatable issue set
 
-The seeded backlog is intentionally small and stable:
+The seeded backlog is intentionally small and stable. On a fresh `demo` instance the daemon auto-assigns sequential IDs from the `rein-demo` project prefix `RD`:
 
 1. `RD-1` — scaffold the demo project with an agent prompt
 2. `RD-2` — replace the hello-world print with a reusable greet helper
@@ -161,4 +162,4 @@ The seeded backlog is intentionally small and stable:
 4. `RD-4` — add a README quickstart for build and run
 5. `RD-5` — add a unit test for the greeting helper
 
-This keeps the training loop lightweight enough to tear down and rebuild whenever the docs or operator flow change.
+These IDs are stable on a clean instance because they are the first five issues created for the project. The bootstrap script uses title-based existence checks so re-running against a live instance does not create duplicates.

@@ -605,3 +605,141 @@ func TestManagedExecutionServerMergesConcurrentIssueUpdatesBeforeCompletion(t *t
 		t.Fatalf("daemon_state.integration_status = %q, want merged", got)
 	}
 }
+
+func TestDeriveIssuePrefix(t *testing.T) {
+t.Parallel()
+cases := []struct {
+id   string
+want string
+}{
+{"rein-demo", "RD"},
+{"my-project", "MP"},
+{"single", "SI"},
+{"a", "A"},
+{"rein-native-agent", "RNA"},
+{"foo_bar_baz", "FBB"},
+{"rein", "RE"},
+{"x-y-z", "XYZ"},
+}
+for _, tc := range cases {
+t.Run(tc.id, func(t *testing.T) {
+got := deriveIssuePrefix(tc.id)
+if got != tc.want {
+t.Errorf("deriveIssuePrefix(%q) = %q, want %q", tc.id, got, tc.want)
+}
+})
+}
+}
+
+func TestCreateProjectAutoPrefix(t *testing.T) {
+t.Parallel()
+ctx := context.Background()
+store, err := sqlite.OpenInMemoryAndMigrate(ctx, t.Name())
+if err != nil {
+t.Fatalf("OpenInMemoryAndMigrate() error = %v", err)
+}
+t.Cleanup(func() { _ = store.Close() })
+
+svc := &ManagedProjectServer{store: store}
+
+// prefix derived automatically
+resp, err := svc.CreateProject(ctx, &reinv1.CreateProjectRequest{
+Project: &reinv1.Project{Id: "rein-demo", Slug: "rein-demo"},
+})
+if err != nil {
+t.Fatalf("CreateProject() error = %v", err)
+}
+if got := resp.GetProject().GetIssuePrefix(); got != "RD" {
+t.Errorf("issue_prefix = %q, want RD", got)
+}
+
+// duplicate prefix rejected
+_, err = svc.CreateProject(ctx, &reinv1.CreateProjectRequest{
+Project: &reinv1.Project{Id: "react-design", Slug: "react-design"},
+})
+if err == nil {
+t.Fatal("expected error for duplicate issue_prefix RD, got nil")
+}
+
+// explicit prefix accepted
+resp2, err := svc.CreateProject(ctx, &reinv1.CreateProjectRequest{
+Project: &reinv1.Project{Id: "react-design", Slug: "react-design", IssuePrefix: "RDS"},
+})
+if err != nil {
+t.Fatalf("CreateProject(explicit prefix) error = %v", err)
+}
+if got := resp2.GetProject().GetIssuePrefix(); got != "RDS" {
+t.Errorf("issue_prefix = %q, want RDS", got)
+}
+
+// duplicate slug rejected
+_, err = svc.CreateProject(ctx, &reinv1.CreateProjectRequest{
+Project: &reinv1.Project{Id: "another-project", Slug: "rein-demo", IssuePrefix: "AP"},
+})
+if err == nil {
+t.Fatal("expected error for duplicate slug, got nil")
+}
+}
+
+func TestCreateIssueAutoID(t *testing.T) {
+t.Parallel()
+ctx := context.Background()
+store, err := sqlite.OpenInMemoryAndMigrate(ctx, t.Name())
+if err != nil {
+t.Fatalf("OpenInMemoryAndMigrate() error = %v", err)
+}
+t.Cleanup(func() { _ = store.Close() })
+
+projectSvc := &ManagedProjectServer{store: store}
+issueSvc := &ManagedIssueServer{store: store}
+
+if _, err := projectSvc.CreateProject(ctx, &reinv1.CreateProjectRequest{
+Project: &reinv1.Project{Id: "rein-demo"},
+}); err != nil {
+t.Fatalf("CreateProject() error = %v", err)
+}
+
+// First auto-generated issue should be RD-1.
+r1, err := issueSvc.CreateIssue(ctx, &reinv1.CreateIssueRequest{
+Issue: &reinv1.Issue{ProjectId: "rein-demo", Title: "First issue"},
+})
+if err != nil {
+t.Fatalf("CreateIssue() error = %v", err)
+}
+if got := r1.GetIssue().GetId(); got != "RD-1" {
+t.Errorf("auto id = %q, want RD-1", got)
+}
+
+// Second auto-generated issue should be RD-2.
+r2, err := issueSvc.CreateIssue(ctx, &reinv1.CreateIssueRequest{
+Issue: &reinv1.Issue{ProjectId: "rein-demo", Title: "Second issue"},
+})
+if err != nil {
+t.Fatalf("CreateIssue() second error = %v", err)
+}
+if got := r2.GetIssue().GetId(); got != "RD-2" {
+t.Errorf("auto id = %q, want RD-2", got)
+}
+
+// Caller-supplied id is respected.
+r3, err := issueSvc.CreateIssue(ctx, &reinv1.CreateIssueRequest{
+Issue: &reinv1.Issue{Id: "RD-99", ProjectId: "rein-demo", Title: "Pinned issue"},
+})
+if err != nil {
+t.Fatalf("CreateIssue(explicit id) error = %v", err)
+}
+if got := r3.GetIssue().GetId(); got != "RD-99" {
+t.Errorf("explicit id = %q, want RD-99", got)
+}
+
+// Next auto after RD-99 should be RD-100.
+r4, err := issueSvc.CreateIssue(ctx, &reinv1.CreateIssueRequest{
+Issue: &reinv1.Issue{ProjectId: "rein-demo", Title: "After gap"},
+})
+if err != nil {
+t.Fatalf("CreateIssue() after gap error = %v", err)
+}
+if got := r4.GetIssue().GetId(); got != "RD-100" {
+t.Errorf("auto id after gap = %q, want RD-100", got)
+}
+}
